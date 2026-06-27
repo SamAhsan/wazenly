@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wazenly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wazenly
+      POSTGRES_PASSWORD: wazenly
+      POSTGRES_DB: wazenly
+    ports:
+      - "5432:5432"
+    volumes:
+      - wazenly_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wazenly"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: wazenly-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - wazenly_redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  wazenly_postgres_data:
+  wazenly_redis_data:

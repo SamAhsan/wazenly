@@ -1,0 +1,9 @@
+
+npm run dev --workspace=apps/api
+
+npm run dev --workspace=apps/web
+
+npm run dev --workspace=packages/queue
+
+docker-compose up -d   # if not already running
+npm run dev            # starts API + Web + Queue in one terminal via Turbo
