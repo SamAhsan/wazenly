@@ -11,6 +11,7 @@ echo "=== Running DB migrations ==="
 npm run db:migrate
 
 echo "=== Building all apps ==="
+rm -rf apps/web/.next
 npm run build
 
 echo "=== Restarting services ==="
