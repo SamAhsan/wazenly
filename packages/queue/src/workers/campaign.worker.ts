@@ -127,12 +127,17 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
   const rateLimit = campaign.rateLimit || 60;
   const delayMs = Math.ceil(60000 / rateLimit);
 
+  // Count {{1}}, {{2}}, ... placeholders in the template body
+  const placeholderCount = (campaign.template.body.match(/\{\{\d+\}\}/g) || []).length;
+
   let sentCount = 0;
   let failedCount = 0;
 
   for (const cc of contacts) {
     try {
-      const variables = (cc.variables as Record<string, string>) || {};
+      // Only pass variables if the template actually has placeholders
+      const rawVars = (cc.variables as Record<string, string>) || {};
+      const variables = placeholderCount > 0 ? rawVars : {};
       const msgId = await sendWhatsAppMessage(
         phoneNumberId,
         accessToken,
