@@ -1,8 +1,8 @@
 {
   "name": "@wazenly/queue",
   "version": "1.0.0",
-  "main": "./dist/queues.js",
-  "types": "./dist/queues.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/worker-runner.ts",
