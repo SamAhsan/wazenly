@@ -44,4 +44,5 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             cd /var/www/wazenly
+            git pull origin main
             bash deploy.sh

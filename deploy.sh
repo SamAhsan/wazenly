@@ -1,10 +1,6 @@
 #!/bin/bash
 set -e
 
-echo "=== Pulling latest code ==="
-cd /var/www/wazenly
-git pull origin main
-
 echo "=== Installing dependencies ==="
 npm install
 
