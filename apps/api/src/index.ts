@@ -25,8 +25,15 @@ import { docsRouter } from "./routes/docs";
 
 import { errorHandler } from "./middleware/error-handler";
 import { setupSocketHandlers } from "./socket/handlers";
+import {
+  createCampaignWorker,
+  createWebhookWorker,
+  createTemplateSyncWorker,
+  createContactImporterWorker,
+} from "@wazenly/queue";
 
 const app = express();
+app.set("trust proxy", 1);
 const httpServer = http.createServer(app);
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
@@ -67,6 +74,12 @@ setupSocketHandlers(io);
 
 // ─── Error handler ────────────────────────────────────────
 app.use(errorHandler);
+
+// Start queue workers in-process so they run whenever the API runs
+createCampaignWorker();
+createWebhookWorker();
+createTemplateSyncWorker();
+createContactImporterWorker();
 
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, () => {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, Filter } from "lucide-react";
+import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatDateTime, formatNumber, pct } from "@/lib/utils";
 
@@ -127,9 +127,14 @@ export default function CampaignsPage() {
                         <BarChart3 className="w-4 h-4" />
                       </Link>
                       {c.status === "RUNNING" && (
-                        <button onClick={() => pauseMutation.mutate(c.id)} className="p-1.5 text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg" title="Pause">
-                          <Pause className="w-4 h-4" />
-                        </button>
+                        <>
+                          <button onClick={() => resumeMutation.mutate(c.id)} disabled={resumeMutation.isPending} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Re-trigger (if stuck)">
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => pauseMutation.mutate(c.id)} className="p-1.5 text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg" title="Pause">
+                            <Pause className="w-4 h-4" />
+                          </button>
+                        </>
                       )}
                       {c.status === "PAUSED" && (
                         <button onClick={() => resumeMutation.mutate(c.id)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Resume">

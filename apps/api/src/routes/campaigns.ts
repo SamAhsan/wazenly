@@ -245,13 +245,13 @@ campaignsRouter.post("/:id/pause", async (req: AuthRequest, res, next) => {
   }
 });
 
-// POST /api/campaigns/:id/resume
+// POST /api/campaigns/:id/resume  (also re-triggers stuck RUNNING campaigns)
 campaignsRouter.post("/:id/resume", async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
-      where: { id: req.params.id, workspaceId: req.workspaceId!, status: "PAUSED" },
+      where: { id: req.params.id, workspaceId: req.workspaceId!, status: { in: ["PAUSED", "RUNNING"] } },
     });
-    if (!campaign) return res.status(404).json({ error: "Campaign not found or not paused" });
+    if (!campaign) return res.status(404).json({ error: "Campaign not found or not resumable" });
 
     await campaignSenderQueue.add("campaign-batch", {
       campaignId: campaign.id,
