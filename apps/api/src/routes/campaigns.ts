@@ -143,12 +143,14 @@ campaignsRouter.put("/:id", async (req: AuthRequest, res, next) => {
     }
 
     const body = campaignSchema.partial().parse(req.body);
+    const { contactListIds: _cids, contacts: _cts, variableMapping, scheduledAt: rawScheduledAt, endDate: rawEndDate, ...campaignFields } = body;
     const updated = await prisma.campaign.update({
       where: { id: req.params.id },
       data: {
-        ...body,
-        scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
-        endDate: body.endDate ? new Date(body.endDate) : undefined,
+        ...campaignFields,
+        scheduledAt: rawScheduledAt ? new Date(rawScheduledAt) : undefined,
+        endDate: rawEndDate ? new Date(rawEndDate) : undefined,
+        variableMapping: variableMapping as any,
       },
     });
     res.json(updated);

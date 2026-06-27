@@ -58,7 +58,7 @@ contactsRouter.post("/", async (req: AuthRequest, res, next) => {
 
     const contact = await prisma.contact.upsert({
       where: { workspaceId_phone: { workspaceId: req.workspaceId!, phone } },
-      create: { workspaceId: req.workspaceId!, ...body, phone },
+      create: { workspaceId: req.workspaceId!, name: body.name, phone, email: body.email, tags: body.tags, customFields: body.customFields as any },
       update: { name: body.name, email: body.email, tags: body.tags, customFields: body.customFields as any },
     });
 

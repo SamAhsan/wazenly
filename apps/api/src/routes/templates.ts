@@ -113,7 +113,7 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
         headerUrl: body.headerUrl,
         body: body.body,
         footer: body.footer,
-        buttons: body.buttons || null,
+        buttons: (body.buttons as any) ?? null,
       },
     });
 
