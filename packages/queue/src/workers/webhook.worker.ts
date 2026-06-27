@@ -134,16 +134,44 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             data: updateData,
           });
 
-          // Update campaign contact status
-          await prisma.campaignContact.updateMany({
-            where: { messageId: status.id },
-            data: {
-              status: (updateData.status as string) as any,
-              deliveredAt: updateData.deliveredAt as Date | undefined,
-              readAt: updateData.readAt as Date | undefined,
-              failedAt: updateData.failedAt as Date | undefined,
-            },
-          });
+          // Update campaign contact status (if this message belongs to a campaign)
+          if (updateData.status) {
+            const campaignContact = await prisma.campaignContact.findFirst({
+              where: { messageId: status.id },
+              select: { campaignId: true },
+            });
+
+            await prisma.campaignContact.updateMany({
+              where: { messageId: status.id },
+              data: {
+                status: (updateData.status as string) as any,
+                deliveredAt: updateData.deliveredAt as Date | undefined,
+                readAt: updateData.readAt as Date | undefined,
+                failedAt: updateData.failedAt as Date | undefined,
+                errorMessage: updateData.errorMessage as string | undefined,
+              },
+            });
+
+            // Recalculate and persist campaign aggregate stats
+            if (campaignContact) {
+              const groupStats = await prisma.campaignContact.groupBy({
+                by: ["status"],
+                where: { campaignId: campaignContact.campaignId },
+                _count: true,
+              });
+              const counts = { SENT: 0, DELIVERED: 0, READ: 0, FAILED: 0, QUEUED: 0 };
+              groupStats.forEach((s) => { counts[s.status as keyof typeof counts] = s._count; });
+              await prisma.campaign.update({
+                where: { id: campaignContact.campaignId },
+                data: {
+                  sentCount: counts.SENT + counts.DELIVERED + counts.READ,
+                  deliveredCount: counts.DELIVERED + counts.READ,
+                  readCount: counts.READ,
+                  failedCount: counts.FAILED,
+                },
+              });
+            }
+          }
 
           await dispatchOutboundWebhooks(number.workspaceId, `message.${metaStatus}`, {
             messageId: status.id,

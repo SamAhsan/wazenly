@@ -257,7 +257,7 @@ campaignsRouter.post("/:id/resume", async (req: AuthRequest, res, next) => {
       campaignId: campaign.id,
       workspaceId: req.workspaceId!,
       numberId: campaign.numberId,
-      batchOffset: campaign.sentCount,
+      batchOffset: 0,
       batchSize: CAMPAIGN_BATCH_SIZE,
     });
 

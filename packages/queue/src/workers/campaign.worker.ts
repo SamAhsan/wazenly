@@ -91,11 +91,11 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
 
   const contacts = await prisma.campaignContact.findMany({
     where: { campaignId, status: "QUEUED" },
-    skip: batchOffset,
+    orderBy: { createdAt: "asc" },
     take: batchSize,
   });
 
-  console.log(`[Campaign ${campaignId}] Found ${contacts.length} QUEUED contact(s) at offset ${batchOffset}`);
+  console.log(`[Campaign ${campaignId}] Found ${contacts.length} QUEUED contact(s)`);
 
   if (contacts.length === 0) {
     // All contacts processed — mark campaign complete
@@ -190,23 +190,36 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
     },
   });
 
-  // Queue next batch
-  const nextOffset = batchOffset + batchSize;
-  const hasMore = await prisma.campaignContact.count({
+  // Queue next batch or mark complete
+  const remaining = await prisma.campaignContact.count({
     where: { campaignId, status: "QUEUED" },
   });
 
-  if (hasMore > 0) {
+  if (remaining > 0) {
     await campaignSenderQueue.add("campaign-batch", {
       ...job.data,
-      batchOffset: nextOffset,
+      batchOffset: 0,
     });
   } else {
-    // Mark complete
+    // No QUEUED contacts left — compute final stats and mark complete
+    const finalStats = await prisma.campaignContact.groupBy({
+      by: ["status"],
+      where: { campaignId },
+      _count: true,
+    });
+    const counts = { SENT: 0, DELIVERED: 0, READ: 0, FAILED: 0 };
+    finalStats.forEach((s) => { counts[s.status as keyof typeof counts] = s._count; });
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: "COMPLETED" },
+      data: {
+        status: "COMPLETED",
+        sentCount: counts.SENT + counts.DELIVERED + counts.READ,
+        deliveredCount: counts.DELIVERED + counts.READ,
+        readCount: counts.READ,
+        failedCount: counts.FAILED,
+      },
     });
+    console.log(`[Campaign ${campaignId}] Completed — sent:${counts.SENT + counts.DELIVERED + counts.READ} failed:${counts.FAILED}`);
   }
 }
 
