@@ -28,14 +28,16 @@ import { setupSocketHandlers } from "./socket/handlers";
 const app = express();
 const httpServer = http.createServer(app);
 
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
+
 export const io = new SocketServer(httpServer, {
-  cors: { origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000", credentials: true },
+  cors: { origin: CORS_ORIGIN, credentials: true },
 });
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  origin: CORS_ORIGIN,
   credentials: true,
 }));
 app.use(morgan("combined"));
