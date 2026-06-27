@@ -31,7 +31,11 @@ export default function TemplatesPage() {
 
   const syncMutation = useMutation({
     mutationFn: (numberId: string) => api.post("/templates/sync", { numberId }),
-    onSuccess: () => toast.success("Template sync queued"),
+    onSuccess: (r) => {
+      toast.success(r.data.message || "Templates synced");
+      queryClient.invalidateQueries({ queryKey: ["templates"] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) => toast.error(e.response?.data?.error || "Failed to sync templates"),
   });
 
   const { data: numbers = [] } = useQuery({ queryKey: ["numbers"], queryFn: () => api.get("/numbers").then((r) => r.data) });
@@ -50,7 +54,8 @@ export default function TemplatesPage() {
         <div className="flex gap-2">
           {numbers[0] && (
             <button onClick={() => syncMutation.mutate(numbers[0].id)} disabled={syncMutation.isPending} className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
-              <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} /> Sync from Meta
+              <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+              {syncMutation.isPending ? "Syncing..." : "Sync from Meta"}
             </button>
           )}
           <Link href="/dashboard/templates/new" className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium">

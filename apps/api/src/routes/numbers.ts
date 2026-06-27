@@ -11,11 +11,9 @@ export const numbersRouter = Router();
 numbersRouter.use(requireAuth, requireWorkspace);
 
 const numberSchema = z.object({
-  displayName: z.string().min(2),
-  phoneNumber: z.string(),
-  phoneNumberId: z.string(),
-  wabaId: z.string(),
-  accessToken: z.string(),
+  phoneNumberId: z.string().min(1),
+  wabaId: z.string().min(1),
+  accessToken: z.string().min(1),
 });
 
 // GET /api/numbers
@@ -42,10 +40,10 @@ numbersRouter.post("/", async (req: AuthRequest, res, next) => {
   try {
     const body = numberSchema.parse(req.body);
 
-    // Verify number with Meta
-    let metaInfo = null;
+    // Verify number with Meta and auto-fetch business name + phone number
+    const meta = new MetaApiService(body.accessToken, body.phoneNumberId);
+    let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
     try {
-      const meta = new MetaApiService(body.accessToken, body.phoneNumberId);
       metaInfo = await meta.getPhoneNumberInfo();
     } catch {
       return res.status(400).json({ error: "Could not verify WhatsApp number with Meta. Check credentials." });
@@ -57,8 +55,8 @@ numbersRouter.post("/", async (req: AuthRequest, res, next) => {
     const number = await prisma.whatsAppNumber.create({
       data: {
         workspaceId: req.workspaceId!,
-        displayName: body.displayName,
-        phoneNumber: body.phoneNumber,
+        displayName: metaInfo.verified_name,
+        phoneNumber: metaInfo.display_phone_number,
         phoneNumberId: body.phoneNumberId,
         wabaId: body.wabaId,
         accessToken: encrypt(body.accessToken),
@@ -69,7 +67,6 @@ numbersRouter.post("/", async (req: AuthRequest, res, next) => {
 
     // Register webhook with Meta
     try {
-      const meta = new MetaApiService(body.accessToken, body.phoneNumberId);
       await meta.registerWebhook(body.wabaId, webhookUrl, verifyToken);
     } catch {
       console.warn("[Numbers] Webhook registration failed — configure manually in Meta dashboard");

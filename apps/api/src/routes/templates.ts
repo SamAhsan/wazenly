@@ -157,15 +157,56 @@ templatesRouter.post("/sync", async (req: AuthRequest, res, next) => {
     });
     if (!number) return res.status(404).json({ error: "Number not found" });
 
-    const { templateSyncQueue } = await import("@wazenly/queue");
-    await templateSyncQueue.add("sync-templates", {
-      workspaceId: req.workspaceId!,
-      numberId: number.id,
-      wabaId: number.wabaId,
-      accessToken: number.accessToken,
-    });
+    const accessToken = decrypt(number.accessToken);
+    const meta = new MetaApiService(accessToken, number.phoneNumberId);
 
-    res.json({ success: true, message: "Template sync queued" });
+    let rawTemplates: object[];
+    try {
+      rawTemplates = await meta.getTemplates(number.wabaId);
+    } catch {
+      return res.status(400).json({ error: "Failed to fetch templates from Meta. Check your access token." });
+    }
+
+    let synced = 0;
+    for (const t of rawTemplates as any[]) {
+      const bodyComp = t.components?.find((c: any) => c.type === "BODY");
+      const headerComp = t.components?.find((c: any) => c.type === "HEADER");
+      const footerComp = t.components?.find((c: any) => c.type === "FOOTER");
+      const buttonComp = t.components?.find((c: any) => c.type === "BUTTONS");
+
+      const existing = await prisma.template.findFirst({
+        where: { workspaceId: req.workspaceId!, metaId: t.id },
+        select: { id: true },
+      });
+
+      if (existing) {
+        await prisma.template.update({
+          where: { id: existing.id },
+          data: { status: t.status, lastSyncedAt: new Date() },
+        });
+      } else {
+        await prisma.template.create({
+          data: {
+            workspaceId: req.workspaceId!,
+            numberId,
+            metaId: t.id,
+            name: t.name,
+            category: t.category,
+            language: t.language,
+            status: t.status,
+            headerType: (headerComp?.format?.toUpperCase() || "NONE") as any,
+            headerText: headerComp?.format === "TEXT" ? headerComp.text : undefined,
+            body: bodyComp?.text || "",
+            footer: footerComp?.text,
+            buttons: buttonComp?.buttons ?? null,
+            lastSyncedAt: new Date(),
+          },
+        });
+      }
+      synced++;
+    }
+
+    res.json({ success: true, synced, message: `Synced ${synced} template${synced !== 1 ? "s" : ""}` });
   } catch (err) {
     next(err);
   }

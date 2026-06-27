@@ -48,7 +48,11 @@ export default function ContactsPage() {
   const { register: regList, handleSubmit: hsList, reset: resetList } = useForm<{ name: string; description?: string }>();
 
   const addContact = useMutation({
-    mutationFn: (d: { name: string; phone: string; email?: string }) => api.post("/contacts", d),
+    mutationFn: (d: { name: string; phone: string; email?: string }) => {
+      const payload: { name: string; phone: string; email?: string } = { name: d.name, phone: d.phone };
+      if (d.email) payload.email = d.email;
+      return api.post("/contacts", payload);
+    },
     onSuccess: () => { toast.success("Contact added"); qc.invalidateQueries({ queryKey: ["contacts"] }); setShowAdd(false); resetContact(); },
     onError: (e: { response?: { data?: { error?: string } } }) => toast.error(e.response?.data?.error || "Failed"),
   });
@@ -332,17 +336,21 @@ export default function ContactsPage() {
               <button onClick={() => setShowAdd(false)}><X className="w-4 h-4 text-gray-400" /></button>
             </div>
             <form onSubmit={hsContact((d) => addContact.mutate(d))} className="space-y-3">
-              {[
-                { name: "name", label: "Full Name", placeholder: "John Smith", required: true },
-                { name: "phone", label: "Phone (with country code)", placeholder: "+923001234567", required: true },
-                { name: "email", label: "Email (optional)", placeholder: "john@example.com" },
-              ].map(({ name, label, placeholder, required }) => (
-                <div key={name}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                  <input {...regContact(name as "name" | "phone" | "email")} required={required} placeholder={placeholder}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                </div>
-              ))}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <input {...regContact("name")} required placeholder="John Smith"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone (with country code)</label>
+                <input {...regContact("phone")} required placeholder="+923001234567"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input {...regContact("email")} placeholder="john@example.com"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={() => setShowAdd(false)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
                 <button type="submit" disabled={addContact.isPending} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm disabled:opacity-70">

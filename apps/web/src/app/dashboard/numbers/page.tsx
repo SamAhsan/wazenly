@@ -11,11 +11,9 @@ import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 
 const numberSchema = z.object({
-  displayName: z.string().min(2),
-  phoneNumber: z.string(),
-  phoneNumberId: z.string(),
-  wabaId: z.string(),
-  accessToken: z.string().min(10),
+  phoneNumberId: z.string().min(1, "Required"),
+  wabaId: z.string().min(1, "Required"),
+  accessToken: z.string().min(10, "Required"),
 });
 type NumberForm = z.infer<typeof numberSchema>;
 
@@ -87,10 +85,9 @@ export default function NumbersPage() {
             <h2 className="text-xl font-bold text-gray-900 mb-1">Connect WhatsApp Number</h2>
             <p className="text-sm text-gray-500 mb-5">Enter your Meta Developer credentials to connect a number.</p>
 
+            <p className="text-xs text-gray-400 -mt-3 mb-1">Business name and phone number will be auto-detected from Meta.</p>
             <form onSubmit={handleSubmit((d) => addMutation.mutate(d))} className="space-y-4">
               {[
-                { name: "displayName", label: "Display Name", placeholder: "Acme Support" },
-                { name: "phoneNumber", label: "Phone Number", placeholder: "+15551234567" },
                 { name: "phoneNumberId", label: "Phone Number ID", placeholder: "1234567890" },
                 { name: "wabaId", label: "WhatsApp Business Account ID", placeholder: "9876543210" },
                 { name: "accessToken", label: "Access Token", placeholder: "EAAxxxx..." },
