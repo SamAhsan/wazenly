@@ -7,6 +7,5 @@ dist/
 *.env.production
 .DS_Store
 *.log
-prisma/migrations/
 coverage/
 .nyc_output/
