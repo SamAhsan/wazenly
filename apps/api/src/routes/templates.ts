@@ -79,7 +79,7 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
     if (!req.file) return res.status(400).json({ error: "File required" });
     const { numberId } = req.body as { numberId: string };
     if (!numberId) {
-      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
+      fs.unlink(req.file.path, () => {});
       return res.status(400).json({ error: "numberId required" });
     }
 
@@ -87,17 +87,14 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
       where: { id: numberId, workspaceId: req.workspaceId! },
     });
     if (!number) {
-      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
-      return res.status(400).json({ error: "Invalid number" });
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: "Number not found in this workspace" });
     }
 
-    const filename = (req.file as Express.Multer.File & { filename: string }).filename;
-    const publicUrl = `${process.env.WEBHOOK_BASE_URL}/uploads/${filename}`;
+    const publicUrl = `${process.env.WEBHOOK_BASE_URL}/uploads/${req.file.filename}`;
     res.json({ url: publicUrl, mediaId: null });
   } catch (err) {
-    if ((req.file as (Express.Multer.File & { path?: string }) | undefined)?.path) {
-      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
-    }
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
     next(err);
   }
 });

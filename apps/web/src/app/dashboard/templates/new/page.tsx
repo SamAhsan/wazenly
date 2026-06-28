@@ -96,8 +96,10 @@ export default function NewTemplatePage() {
         setMediaPreview(null);
       }
       toast.success("File uploaded");
-    } catch {
-      toast.error("Upload failed — check that your WhatsApp number is connected");
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string }; status?: number } };
+      const msg = err?.response?.data?.error || "Upload failed";
+      toast.error(msg);
     } finally {
       setUploadingMedia(false);
     }
