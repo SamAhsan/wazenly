@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { ChevronRight, ChevronLeft, Check, Rocket } from "lucide-react";
+import { ChevronRight, ChevronLeft, Check, Rocket, Users, User } from "lucide-react";
 import api from "@/lib/api";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 const STEPS = ["Basic Info", "Audience", "Template", "Schedule", "Review"];
 
@@ -17,6 +17,8 @@ interface CampaignDraft {
   type: "ONE_TIME" | "RECURRING";
   templateId?: string;
   contactListIds?: string[];
+  singlePhone?: string;
+  singleName?: string;
   scheduledAt?: string;
   timezone: string;
   rateLimit: number;
@@ -28,29 +30,84 @@ interface CampaignDraft {
 export default function NewCampaignPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<Partial<CampaignDraft>>({ type: "ONE_TIME", timezone: "UTC", rateLimit: 60 });
+  const { selectedNumberId } = useSelectedNumber();
+  const [draft, setDraft] = useState<Partial<CampaignDraft>>({
+    type: "ONE_TIME",
+    timezone: "UTC",
+    rateLimit: 60,
+  });
+  const [audienceMode, setAudienceMode] = useState<"list" | "single">("list");
 
-  const { data: numbers = [] } = useQuery({ queryKey: ["numbers"], queryFn: () => api.get("/numbers").then((r) => r.data) });
-  const { data: lists = [] } = useQuery({ queryKey: ["contact-lists"], queryFn: () => api.get("/contacts/lists/all").then((r) => r.data) });
+  // Pre-select number from context
+  useEffect(() => {
+    if (selectedNumberId && !draft.numberId) {
+      setDraft((prev) => ({ ...prev, numberId: selectedNumberId }));
+    }
+  }, [selectedNumberId]);
+
+  const { data: numbers = [] } = useQuery({
+    queryKey: ["numbers"],
+    queryFn: () => api.get("/numbers").then((r) => r.data),
+  });
+  const { data: lists = [] } = useQuery({
+    queryKey: ["contact-lists"],
+    queryFn: () => api.get("/contacts/lists/all").then((r) => r.data),
+  });
   const { data: templates = [] } = useQuery({
     queryKey: ["templates", draft.numberId],
-    queryFn: () => api.get("/templates", { params: { status: "APPROVED" } }).then((r) => r.data.data || []),
+    queryFn: () =>
+      api.get("/templates", { params: { status: "APPROVED", numberId: draft.numberId } }).then((r) => r.data.data || []),
     enabled: !!draft.numberId,
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: CampaignDraft) => api.post("/campaigns", data),
-    onSuccess: async (res) => {
-      const campaignId = res.data.id;
-      await api.post(`/campaigns/${campaignId}/launch`);
+    mutationFn: async (data: Partial<CampaignDraft>) => {
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        description: data.description,
+        numberId: data.numberId,
+        templateId: data.templateId,
+        type: data.type,
+        timezone: data.timezone,
+        rateLimit: data.rateLimit,
+        scheduledAt: data.scheduledAt,
+        quietHoursStart: data.quietHoursStart,
+        quietHoursEnd: data.quietHoursEnd,
+      };
+
+      if (audienceMode === "single" && data.singlePhone) {
+        const phone = data.singlePhone.startsWith("+") ? data.singlePhone : `+${data.singlePhone}`;
+        payload.contacts = [{ phone, variables: { name: data.singleName || "" } }];
+      } else {
+        payload.contactListIds = data.contactListIds;
+      }
+
+      const campaign = await api.post("/campaigns", payload);
+      await api.post(`/campaigns/${campaign.data.id}/launch`);
+      return campaign.data;
+    },
+    onSuccess: () => {
       toast.success("Campaign launched!");
       router.push("/dashboard/campaigns");
     },
-    onError: () => toast.error("Failed to create campaign"),
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to create campaign"),
   });
 
   const saveDraftMutation = useMutation({
-    mutationFn: (data: Partial<CampaignDraft>) => api.post("/campaigns", data),
+    mutationFn: async (data: Partial<CampaignDraft>) => {
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        description: data.description,
+        numberId: data.numberId,
+        templateId: data.templateId,
+        type: data.type || "ONE_TIME",
+        timezone: data.timezone || "UTC",
+        rateLimit: data.rateLimit || 60,
+      };
+      if (audienceMode === "list") payload.contactListIds = data.contactListIds;
+      return api.post("/campaigns", payload);
+    },
     onSuccess: () => { toast.success("Saved as draft"); router.push("/dashboard/campaigns"); },
   });
 
@@ -60,7 +117,10 @@ export default function NewCampaignPage() {
 
   const isValid = (s: number) => {
     if (s === 0) return !!(draft.name && draft.numberId);
-    if (s === 1) return !!(draft.contactListIds?.length);
+    if (s === 1) {
+      if (audienceMode === "single") return !!(draft.singlePhone);
+      return !!(draft.contactListIds?.length);
+    }
     if (s === 2) return !!(draft.templateId);
     return true;
   };
@@ -98,15 +158,29 @@ export default function NewCampaignPage() {
             <h2 className="font-semibold text-gray-900">Basic Information</h2>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Name *</label>
-              <input value={draft.name || ""} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. January Newsletter" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <input
+                value={draft.name || ""}
+                onChange={(e) => update({ name: e.target.value })}
+                placeholder="e.g. January Newsletter"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea value={draft.description || ""} onChange={(e) => update({ description: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+              <textarea
+                value={draft.description || ""}
+                onChange={(e) => update({ description: e.target.value })}
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">From Number *</label>
-              <select value={draft.numberId || ""} onChange={(e) => update({ numberId: e.target.value })} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <select
+                value={draft.numberId || ""}
+                onChange={(e) => update({ numberId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
                 <option value="">Select a number...</option>
                 {numbers.filter((n: { status: string }) => n.status === "CONNECTED").map((n: { id: string; displayName: string; phoneNumber: string }) => (
                   <option key={n.id} value={n.id}>{n.displayName} ({n.phoneNumber})</option>
@@ -120,29 +194,88 @@ export default function NewCampaignPage() {
         {step === 1 && (
           <div className="space-y-4">
             <h2 className="font-semibold text-gray-900">Select Audience</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Contact Lists</label>
-              <div className="space-y-2 max-h-72 overflow-y-auto">
-                {lists.map((l: { id: string; name: string; _count?: { members: number } }) => (
-                  <label key={l.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="checkbox"
-                      checked={draft.contactListIds?.includes(l.id) || false}
-                      onChange={(e) => {
-                        const ids = draft.contactListIds || [];
-                        update({ contactListIds: e.target.checked ? [...ids, l.id] : ids.filter((id) => id !== l.id) });
-                      }}
-                      className="w-4 h-4 accent-primary"
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{l.name}</p>
-                      <p className="text-xs text-gray-500">{l._count?.members || 0} contacts</p>
-                    </div>
-                  </label>
-                ))}
-                {lists.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No contact lists yet. <a href="/dashboard/contacts" className="text-primary">Create one</a>.</p>}
-              </div>
+
+            {/* Mode toggle */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAudienceMode("list")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                  audienceMode === "list"
+                    ? "bg-primary text-white border-primary"
+                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                <Users className="w-4 h-4" /> Contact List
+              </button>
+              <button
+                onClick={() => setAudienceMode("single")}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                  audienceMode === "single"
+                    ? "bg-primary text-white border-primary"
+                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                <User className="w-4 h-4" /> Single Contact
+              </button>
             </div>
+
+            {audienceMode === "list" && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Contact Lists</label>
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {lists.map((l: { id: string; name: string; _count?: { members: number } }) => (
+                    <label key={l.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={draft.contactListIds?.includes(l.id) || false}
+                        onChange={(e) => {
+                          const ids = draft.contactListIds || [];
+                          update({ contactListIds: e.target.checked ? [...ids, l.id] : ids.filter((id) => id !== l.id) });
+                        }}
+                        className="w-4 h-4 accent-primary"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{l.name}</p>
+                        <p className="text-xs text-gray-500">{l._count?.members || 0} contacts</p>
+                      </div>
+                    </label>
+                  ))}
+                  {lists.length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-6">
+                      No contact lists yet. <a href="/dashboard/contacts" className="text-primary">Create one</a>.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {audienceMode === "single" && (
+              <div className="space-y-3">
+                <div className="p-3 bg-blue-50 rounded-xl text-xs text-blue-700">
+                  Send this template directly to one person. Perfect for testing or individual notifications.
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number *</label>
+                  <input
+                    value={draft.singlePhone || ""}
+                    onChange={(e) => update({ singlePhone: e.target.value })}
+                    placeholder="+923001234567"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <p className="text-xs text-gray-400 mt-0.5">Include country code (e.g. +92 for Pakistan)</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input
+                    value={draft.singleName || ""}
+                    onChange={(e) => update({ singleName: e.target.value })}
+                    placeholder="e.g. Ahmed Khan"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <p className="text-xs text-gray-400 mt-0.5">Used to replace {"{{name}}"} variable if your template uses it.</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -152,7 +285,10 @@ export default function NewCampaignPage() {
             <h2 className="font-semibold text-gray-900">Select Template</h2>
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {templates.map((t: { id: string; name: string; category: string; language: string; body: string }) => (
-                <label key={t.id} className={`flex items-start gap-3 p-4 border rounded-xl cursor-pointer transition-colors ${draft.templateId === t.id ? "border-primary bg-primary/5" : "border-gray-200 hover:bg-gray-50"}`}>
+                <label
+                  key={t.id}
+                  className={`flex items-start gap-3 p-4 border rounded-xl cursor-pointer transition-colors ${draft.templateId === t.id ? "border-primary bg-primary/5" : "border-gray-200 hover:bg-gray-50"}`}
+                >
                   <input type="radio" name="template" value={t.id} checked={draft.templateId === t.id} onChange={() => update({ templateId: t.id })} className="mt-0.5 accent-primary" />
                   <div>
                     <p className="text-sm font-medium text-gray-900 font-mono">{t.name}</p>
@@ -164,7 +300,12 @@ export default function NewCampaignPage() {
                   </div>
                 </label>
               ))}
-              {templates.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No approved templates. <a href="/dashboard/templates/new" className="text-primary">Create one</a>.</p>}
+              {templates.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-6">
+                  No approved templates for this number.{" "}
+                  <a href="/dashboard/templates/new" className="text-primary">Create one</a>.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -174,13 +315,22 @@ export default function NewCampaignPage() {
           <div className="space-y-4">
             <h2 className="font-semibold text-gray-900">Scheduling & Rate Limiting</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Send at</label>
-              <input type="datetime-local" value={draft.scheduledAt || ""} onChange={(e) => update({ scheduledAt: e.target.value })} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Send at <span className="text-gray-400 font-normal">(optional)</span></label>
+              <input
+                type="datetime-local"
+                value={draft.scheduledAt || ""}
+                onChange={(e) => update({ scheduledAt: e.target.value })}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
               <p className="text-xs text-gray-400 mt-1">Leave blank to send immediately after launch.</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Rate Limit (messages/minute)</label>
-              <select value={draft.rateLimit} onChange={(e) => update({ rateLimit: Number(e.target.value) })} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <select
+                value={draft.rateLimit}
+                onChange={(e) => update({ rateLimit: Number(e.target.value) })}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
                 {[10, 30, 60, 100, 1000].map((v) => <option key={v} value={v}>{v} msg/min</option>)}
               </select>
             </div>
@@ -206,7 +356,14 @@ export default function NewCampaignPage() {
                 { label: "Campaign Name", value: draft.name },
                 { label: "From Number", value: selectedNumber ? `${selectedNumber.displayName} (${selectedNumber.phoneNumber})` : "—" },
                 { label: "Template", value: selectedTemplate?.name || "—" },
-                { label: "Audience", value: selectedLists.length > 0 ? selectedLists.map((l: { name: string }) => l.name).join(", ") : "—" },
+                {
+                  label: "Audience",
+                  value: audienceMode === "single"
+                    ? `Single contact: ${draft.singlePhone || "—"}${draft.singleName ? ` (${draft.singleName})` : ""}`
+                    : selectedLists.length > 0
+                      ? selectedLists.map((l: { name: string }) => l.name).join(", ")
+                      : "—",
+                },
                 { label: "Rate Limit", value: `${draft.rateLimit} msg/min` },
                 { label: "Send At", value: draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString() : "Immediately on launch" },
               ].map(({ label, value }) => (
@@ -232,7 +389,7 @@ export default function NewCampaignPage() {
         <div className="flex gap-2">
           {step === 4 && (
             <button
-              onClick={() => saveDraftMutation.mutate(draft as CampaignDraft)}
+              onClick={() => saveDraftMutation.mutate(draft)}
               disabled={saveDraftMutation.isPending}
               className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
             >
@@ -249,7 +406,7 @@ export default function NewCampaignPage() {
             </button>
           ) : (
             <button
-              onClick={() => createMutation.mutate(draft as CampaignDraft)}
+              onClick={() => createMutation.mutate(draft)}
               disabled={createMutation.isPending}
               className="flex items-center gap-2 bg-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-50"
             >

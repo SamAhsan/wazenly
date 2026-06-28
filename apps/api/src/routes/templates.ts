@@ -1,12 +1,17 @@
 import { Router } from "express";
+import multer from "multer";
+import FormData from "form-data";
+import axios from "axios";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
 import { MetaApiService } from "../services/meta.service";
-import { decrypt } from "@wazenly/shared";
+import { decrypt, META_GRAPH_URL } from "@wazenly/shared";
 
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth, requireWorkspace);
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
 const templateSchema = z.object({
   name: z.string().regex(/^[a-z0-9_]+$/),
@@ -24,6 +29,7 @@ const templateSchema = z.object({
     url: z.string().optional(),
     phone_number: z.string().optional(),
   })).optional(),
+  bodyExamples: z.record(z.string()).optional(),
 });
 
 // GET /api/templates
@@ -53,6 +59,52 @@ templatesRouter.get("/", async (req: AuthRequest, res, next) => {
   }
 });
 
+// POST /api/templates/upload-media — upload sample media file to Meta, return URL
+templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "File required" });
+    const { numberId } = req.body as { numberId: string };
+    if (!numberId) return res.status(400).json({ error: "numberId required" });
+
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: numberId, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(400).json({ error: "Invalid number" });
+
+    const accessToken = decrypt(number.accessToken);
+
+    // Upload to Meta WhatsApp media endpoint
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", req.file.mimetype);
+    form.append("file", req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
+
+    const uploadRes = await axios.post(
+      `${META_GRAPH_URL}/${number.phoneNumberId}/media`,
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const mediaId: string = uploadRes.data.id;
+
+    // Fetch the media URL
+    const mediaInfoRes = await axios.get(`${META_GRAPH_URL}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const url: string = mediaInfoRes.data.url || "";
+
+    res.json({ mediaId, url });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/templates
 templatesRouter.post("/", async (req: AuthRequest, res, next) => {
   try {
@@ -66,24 +118,43 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
     const accessToken = decrypt(number.accessToken);
     const meta = new MetaApiService(accessToken, number.phoneNumberId);
 
-    // Build Meta template payload
+    // Build Meta template components
     const components: object[] = [];
 
     if (body.headerType !== "NONE") {
       const headerComp: Record<string, unknown> = { type: "HEADER", format: body.headerType };
-      if (body.headerType === "TEXT" && body.headerText) headerComp.text = body.headerText;
+      if (body.headerType === "TEXT" && body.headerText) {
+        headerComp.text = body.headerText;
+      } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && body.headerUrl) {
+        // Include example URL for Meta review — speeds up approval
+        headerComp.example = { header_url: [body.headerUrl] };
+      }
       components.push(headerComp);
     }
 
-    components.push({ type: "BODY", text: body.body });
+    // Body with variable examples if provided
+    const bodyComp: Record<string, unknown> = { type: "BODY", text: body.body };
+    if (body.bodyExamples && Object.keys(body.bodyExamples).length > 0) {
+      // Meta expects [[val1, val2, ...]] — one array per message sample
+      const sortedKeys = Object.keys(body.bodyExamples).sort((a, b) => Number(a) - Number(b));
+      const exampleValues = sortedKeys.map((k) => body.bodyExamples![k]).filter(Boolean);
+      if (exampleValues.length > 0) {
+        bodyComp.example = { body_text: [exampleValues] };
+      }
+    }
+    components.push(bodyComp);
+
     if (body.footer) components.push({ type: "FOOTER", text: body.footer });
     if (body.buttons?.length) {
-      components.push({ type: "BUTTONS", buttons: body.buttons.map((b) => ({
-        type: b.type,
-        text: b.text,
-        ...(b.url ? { url: b.url } : {}),
-        ...(b.phone_number ? { phone_number: b.phone_number } : {}),
-      })) });
+      components.push({
+        type: "BUTTONS",
+        buttons: body.buttons.map((b) => ({
+          type: b.type,
+          text: b.text,
+          ...(b.url ? { url: b.url } : {}),
+          ...(b.phone_number ? { phone_number: b.phone_number } : {}),
+        })),
+      });
     }
 
     let metaId: string | undefined;
@@ -96,7 +167,7 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
       }) as { id: string };
       metaId = result.id;
     } catch {
-      return res.status(400).json({ error: "Failed to submit template to Meta. Check template content." });
+      return res.status(400).json({ error: "Failed to submit template to Meta. Check template content and try again." });
     }
 
     const template = await prisma.template.create({
@@ -196,6 +267,7 @@ templatesRouter.post("/sync", async (req: AuthRequest, res, next) => {
             status: t.status,
             headerType: (headerComp?.format?.toUpperCase() || "NONE") as any,
             headerText: headerComp?.format === "TEXT" ? headerComp.text : undefined,
+            headerUrl: headerComp?.example?.header_url?.[0],
             body: bodyComp?.text || "",
             footer: footerComp?.text,
             buttons: buttonComp?.buttons ?? null,

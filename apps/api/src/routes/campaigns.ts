@@ -33,11 +33,12 @@ const campaignSchema = z.object({
 // GET /api/campaigns
 campaignsRouter.get("/", async (req: AuthRequest, res, next) => {
   try {
-    const { status, page = "1", limit = "20" } = req.query as Record<string, string>;
+    const { status, numberId, page = "1", limit = "20" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
     if (status) where.status = status;
+    if (numberId) where.numberId = numberId;
 
     const [campaigns, total] = await Promise.all([
       prisma.campaign.findMany({

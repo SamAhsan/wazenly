@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, FileText, AlertCircle } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials } from "@/lib/utils";
 
@@ -15,6 +15,19 @@ type Contact = {
 };
 type ContactList = { id: string; name: string; description?: string; _count?: { members: number } };
 
+// Normalise phone: strip spaces/dashes, ensure starts with +
+function normalizePhone(raw: string): string {
+  let p = raw.replace(/[\s\-().]/g, "");
+  if (!p.startsWith("+")) p = "+" + p;
+  return p;
+}
+
+function isValidPhone(p: string): boolean {
+  return /^\+\d{7,15}$/.test(p);
+}
+
+type CsvRow = Record<string, string>;
+
 export default function ContactsPage() {
   const [tab, setTab] = useState<"contacts" | "lists">("contacts");
   const [search, setSearch] = useState("");
@@ -24,6 +37,14 @@ export default function ContactsPage() {
   const [activeList, setActiveList] = useState<ContactList | null>(null);
   const [showAddToList, setShowAddToList] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+
+  // CSV import modal state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvListName, setCsvListName] = useState("");
+
   const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
 
@@ -63,14 +84,22 @@ export default function ContactsPage() {
   });
 
   const importContacts = useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: async ({ file, listId }: { file: File; listId: string }) => {
       const form = new FormData();
       form.append("file", file);
       form.append("deduplicate", "true");
-      if (activeList) form.append("listId", activeList.id);
+      form.append("listId", listId);
       return api.post("/contacts/import", form, { headers: { "Content-Type": "multipart/form-data" } });
     },
-    onSuccess: (r) => { toast.success(`Import started: ${r.data.totalRows} rows queued`); qc.invalidateQueries({ queryKey: ["contacts"] }); },
+    onSuccess: (r) => {
+      toast.success(`Import started — ${r.data.totalRows} rows queued`);
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contact-lists"] });
+      setShowCsvModal(false);
+      setCsvFile(null);
+      setCsvRows([]);
+      setCsvListName("");
+    },
     onError: () => toast.error("Import failed"),
   });
 
@@ -97,6 +126,56 @@ export default function ContactsPage() {
   const contacts: Contact[] = data?.data || [];
   const listContactsData: Contact[] = listContacts?.data || [];
 
+  // Parse CSV file client-side and open the naming modal
+  function handleCsvFileSelect(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) { toast.error("CSV file is empty or has no data rows"); return; }
+
+      const headers = lines[0].split(",").map((h) => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
+      const rows: CsvRow[] = [];
+      const errs: string[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const vals = lines[i].split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
+        const row: CsvRow = {};
+        headers.forEach((h, idx) => { row[h] = vals[idx] || ""; });
+
+        const rawPhone = row.phone || row.phonenumber || row["phone number"] || row.mobile || "";
+        if (!rawPhone) { errs.push(`Row ${i}: missing phone number — skipped`); continue; }
+
+        const phone = normalizePhone(rawPhone);
+        if (!isValidPhone(phone)) { errs.push(`Row ${i}: invalid phone "${rawPhone}" — will be skipped`); continue; }
+
+        row._phone_normalized = phone;
+        if (!row.name) row.name = phone; // fallback name
+        rows.push(row);
+      }
+
+      setCsvRows(rows);
+      setCsvErrors(errs);
+      setCsvFile(file);
+      setCsvListName(file.name.replace(/\.csv$/i, "").replace(/[_-]/g, " "));
+      setShowCsvModal(true);
+    };
+    reader.readAsText(file);
+  }
+
+  async function confirmCsvImport() {
+    if (!csvListName.trim()) { toast.error("Please enter a list name"); return; }
+    if (!csvFile) return;
+
+    // First create the list, then import
+    try {
+      const listRes = await api.post("/contacts/lists", { name: csvListName.trim() });
+      importContacts.mutate({ file: csvFile, listId: listRes.data.id });
+    } catch {
+      toast.error("Failed to create list");
+    }
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-5">
       {/* Header */}
@@ -106,21 +185,37 @@ export default function ContactsPage() {
           <p className="text-gray-500 text-sm mt-1">{data?.total || 0} total contacts · {lists.length} lists</p>
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv" className="hidden"
-            onChange={(e) => { if (e.target.files?.[0]) importContacts.mutate(e.target.files[0]); }} />
-          <button onClick={() => fileRef.current?.click()} disabled={importContacts.isPending}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
-            <Upload className="w-4 h-4" /> {importContacts.isPending ? "Importing..." : "Import CSV"}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.[0]) {
+                handleCsvFileSelect(e.target.files[0]);
+                e.target.value = ""; // reset so same file can be re-selected
+              }
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
+          >
+            <Upload className="w-4 h-4" /> Import CSV
           </button>
           {tab === "contacts" && (
-            <button onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium">
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
+            >
               <Plus className="w-4 h-4" /> Add Contact
             </button>
           )}
           {tab === "lists" && (
-            <button onClick={() => setShowCreateList(true)}
-              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium">
+            <button
+              onClick={() => setShowCreateList(true)}
+              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
+            >
               <Plus className="w-4 h-4" /> New List
             </button>
           )}
@@ -130,8 +225,11 @@ export default function ContactsPage() {
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-100">
         {[{ key: "contacts", label: "All Contacts", icon: Users }, { key: "lists", label: "Lists", icon: List }].map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => { setTab(key as "contacts" | "lists"); setActiveList(null); }}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === key ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+          <button
+            key={key}
+            onClick={() => { setTab(key as "contacts" | "lists"); setActiveList(null); }}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === key ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
             <Icon className="w-4 h-4" /> {label}
           </button>
         ))}
@@ -143,13 +241,19 @@ export default function ContactsPage() {
           <div className="flex items-center gap-3">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)}
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name, phone, email..."
-                className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </div>
             {[{ label: "All", value: undefined }, { label: "Active", value: false }, { label: "Opted Out", value: true }].map(({ label, value }) => (
-              <button key={label} onClick={() => setOptedOutFilter(value as boolean | undefined)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${optedOutFilter === value ? "bg-primary text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              <button
+                key={label}
+                onClick={() => setOptedOutFilter(value as boolean | undefined)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${optedOutFilter === value ? "bg-primary text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+              >
                 {label}
               </button>
             ))}
@@ -206,8 +310,10 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => { if (confirm("Delete contact?")) deleteContact.mutate(c.id); }}
-                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                          <button
+                            onClick={() => { if (confirm("Delete contact?")) deleteContact.mutate(c.id); }}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -236,8 +342,10 @@ export default function ContactsPage() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No lists yet</h3>
               <p className="text-gray-500 text-sm mb-4">Create a list to group contacts for campaigns.</p>
-              <button onClick={() => setShowCreateList(true)}
-                className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg text-sm font-medium">
+              <button
+                onClick={() => setShowCreateList(true)}
+                className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg text-sm font-medium"
+              >
                 <Plus className="w-4 h-4" /> Create First List
               </button>
             </div>
@@ -245,8 +353,11 @@ export default function ContactsPage() {
           {lists.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {lists.map((l) => (
-                <button key={l.id} onClick={() => setActiveList(l)}
-                  className="text-left p-5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-primary/40 hover:shadow-md transition-all">
+                <button
+                  key={l.id}
+                  onClick={() => setActiveList(l)}
+                  className="text-left p-5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-primary/40 hover:shadow-md transition-all"
+                >
                   <div className="flex items-center justify-between mb-3">
                     <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
                       <List className="w-5 h-5 text-primary" />
@@ -274,8 +385,10 @@ export default function ContactsPage() {
 
           <div className="flex items-center justify-between">
             <p className="text-sm text-gray-500">{listContacts?.total || 0} contacts in this list</p>
-            <button onClick={() => setShowAddToList(true)}
-              className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-600">
+            <button
+              onClick={() => setShowAddToList(true)}
+              className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-600"
+            >
               <Plus className="w-4 h-4" /> Add Contacts to List
             </button>
           </div>
@@ -286,8 +399,7 @@ export default function ContactsPage() {
             <div className="text-center py-16">
               <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500 text-sm">No contacts in this list yet.</p>
-              <button onClick={() => setShowAddToList(true)}
-                className="mt-3 text-sm text-primary hover:underline">Add contacts</button>
+              <button onClick={() => setShowAddToList(true)} className="mt-3 text-sm text-primary hover:underline">Add contacts</button>
             </div>
           )}
 
@@ -325,6 +437,111 @@ export default function ContactsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── CSV IMPORT MODAL ── */}
+      {showCsvModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-900">Import Contacts</h2>
+                  <p className="text-xs text-gray-400">{csvRows.length} valid contacts found</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvRows([]); }}>
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+
+            {/* List name */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">List Name *</label>
+              <input
+                value={csvListName}
+                onChange={(e) => setCsvListName(e.target.value)}
+                placeholder="e.g. January Leads"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              <p className="text-xs text-gray-400 mt-0.5">All contacts from this CSV will be added to this list.</p>
+            </div>
+
+            {/* Errors */}
+            {csvErrors.length > 0 && (
+              <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <p className="text-xs font-semibold text-amber-800">{csvErrors.length} row{csvErrors.length !== 1 ? "s" : ""} will be skipped</p>
+                </div>
+                <div className="max-h-20 overflow-y-auto space-y-0.5">
+                  {csvErrors.map((e, i) => (
+                    <p key={i} className="text-xs text-amber-700">{e}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Preview table */}
+            {csvRows.length > 0 && (
+              <div className="flex-1 overflow-hidden">
+                <p className="text-xs font-medium text-gray-500 mb-2">Preview (first 5 rows)</p>
+                <div className="overflow-auto max-h-52 rounded-lg border border-gray-100">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Name</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Phone (Normalized)</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Email</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvRows.slice(0, 5).map((row, i) => (
+                        <tr key={i} className="border-b border-gray-50">
+                          <td className="px-3 py-2 text-gray-800">{row.name || "—"}</td>
+                          <td className="px-3 py-2 font-mono text-gray-700">{row._phone_normalized || row.phone}</td>
+                          <td className="px-3 py-2 text-gray-500">{row.email || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {csvRows.length > 5 && (
+                    <p className="px-3 py-2 text-xs text-gray-400 bg-gray-50">...and {csvRows.length - 5} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {csvRows.length === 0 && (
+              <div className="flex-1 flex items-center justify-center py-8">
+                <div className="text-center">
+                  <AlertCircle className="w-10 h-10 text-red-300 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-gray-700">No valid contacts found</p>
+                  <p className="text-xs text-gray-400 mt-1">Make sure your CSV has a "phone" column with valid numbers including country code.</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100">
+              <button
+                onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvRows([]); }}
+                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={csvRows.length === 0 || !csvListName.trim() || importContacts.isPending}
+                onClick={confirmCsvImport}
+                className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {importContacts.isPending ? "Importing..." : `Import ${csvRows.length} Contact${csvRows.length !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── ADD CONTACT MODAL ── */}
@@ -377,7 +594,7 @@ export default function ContactsPage() {
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input {...regList("description")} placeholder="Optional description"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
@@ -413,8 +630,10 @@ export default function ContactsPage() {
                 const alreadyIn = c.listMemberships.some((m) => m.list.id === activeList.id);
                 const selected = selectedContacts.includes(c.id);
                 return (
-                  <label key={c.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${alreadyIn ? "opacity-40 cursor-not-allowed" : selected ? "bg-primary/5 border border-primary/30" : "hover:bg-gray-50 border border-transparent"}`}>
+                  <label
+                    key={c.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${alreadyIn ? "opacity-40 cursor-not-allowed" : selected ? "bg-primary/5 border border-primary/30" : "hover:bg-gray-50 border border-transparent"}`}
+                  >
                     <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${selected && !alreadyIn ? "bg-primary border-primary" : "border-gray-300"}`}>
                       {selected && !alreadyIn && <Check className="w-3 h-3 text-white" />}
                     </div>
@@ -436,12 +655,12 @@ export default function ContactsPage() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">{selectedContacts.length} selected</span>
               <div className="flex gap-2">
-                <button onClick={() => { setShowAddToList(false); setSelectedContacts([]); }}
-                  className="px-4 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
+                <button onClick={() => { setShowAddToList(false); setSelectedContacts([]); }} className="px-4 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
                 <button
                   disabled={selectedContacts.length === 0 || addToList.isPending}
                   onClick={() => addToList.mutate({ listId: activeList.id, contactIds: selectedContacts })}
-                  className="px-4 py-2 bg-primary text-white rounded-lg text-sm disabled:opacity-50">
+                  className="px-4 py-2 bg-primary text-white rounded-lg text-sm disabled:opacity-50"
+                >
                   {addToList.isPending ? "Adding..." : `Add ${selectedContacts.length || ""} Contact${selectedContacts.length !== 1 ? "s" : ""}`}
                 </button>
               </div>

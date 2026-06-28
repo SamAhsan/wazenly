@@ -15,7 +15,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const contactSchema = z.object({
   name: z.string().min(1),
   phone: z.string(),
-  email: z.string().email().optional(),
+  email: z.preprocess((v) => v === "" ? undefined : v, z.string().email().optional()),
   tags: z.array(z.string()).optional(),
   customFields: z.record(z.unknown()).optional(),
 });

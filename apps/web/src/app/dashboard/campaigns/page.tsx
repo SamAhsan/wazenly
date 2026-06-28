@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatDateTime, formatNumber, pct } from "@/lib/utils";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 const STATUSES = ["ALL", "DRAFT", "SCHEDULED", "RUNNING", "PAUSED", "COMPLETED", "FAILED"];
 
@@ -14,10 +15,17 @@ export default function CampaignsPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
+  const { selectedNumber, selectedNumberId } = useSelectedNumber();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["campaigns", statusFilter],
-    queryFn: () => api.get("/campaigns", { params: statusFilter !== "ALL" ? { status: statusFilter } : {} }).then((r) => r.data),
+    queryKey: ["campaigns", statusFilter, selectedNumberId],
+    queryFn: () =>
+      api.get("/campaigns", {
+        params: {
+          ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+          ...(selectedNumberId ? { numberId: selectedNumberId } : {}),
+        },
+      }).then((r) => r.data),
   });
 
   const pauseMutation = useMutation({
@@ -44,7 +52,11 @@ export default function CampaignsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Campaigns</h1>
-          <p className="text-gray-500 text-sm mt-1">Create and manage WhatsApp message campaigns</p>
+          <p className="text-gray-500 text-sm mt-1">
+            {selectedNumber
+              ? `${selectedNumber.displayName} (${selectedNumber.phoneNumber})`
+              : "Select a number from the top bar to filter campaigns"}
+          </p>
         </div>
         <Link href="/dashboard/campaigns/new" className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium">
           <Plus className="w-4 h-4" /> New Campaign
@@ -57,7 +69,7 @@ export default function CampaignsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search campaigns..." className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 flex-wrap">
           {STATUSES.map((s) => (
             <button
               key={s}
@@ -110,7 +122,7 @@ export default function CampaignsPage() {
                   <td className="px-5 py-4">
                     <Link href={`/dashboard/campaigns/${c.id}`}>
                       <p className="text-sm font-medium text-gray-900 hover:text-primary">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.number?.displayName} {c.template ? `· ${c.template.name}` : ""}</p>
+                      <p className="text-xs text-gray-400">{c.number?.displayName}{c.template ? ` · ${c.template.name}` : ""}</p>
                     </Link>
                   </td>
                   <td className="px-5 py-4">
