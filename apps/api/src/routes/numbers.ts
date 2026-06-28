@@ -105,12 +105,24 @@ numbersRouter.get("/:id", async (req: AuthRequest, res, next) => {
 // PUT /api/numbers/:id
 numbersRouter.put("/:id", async (req: AuthRequest, res, next) => {
   try {
-    const { displayName } = z.object({ displayName: z.string().min(2) }).parse(req.body);
-    const number = await prisma.whatsAppNumber.updateMany({
-      where: { id: req.params.id, workspaceId: req.workspaceId! },
-      data: { displayName },
+    const schema = z.object({
+      displayName: z.string().min(2).optional(),
+      phoneNumberId: z.string().optional(),
+      wabaId: z.string().optional(),
+      accessToken: z.string().optional(),
     });
-    if (!number.count) return res.status(404).json({ error: "Number not found" });
+    const body = schema.parse(req.body);
+    const data: Record<string, string> = {};
+    if (body.displayName) data.displayName = body.displayName;
+    if (body.phoneNumberId) data.phoneNumberId = body.phoneNumberId;
+    if (body.wabaId) data.wabaId = body.wabaId;
+    if (body.accessToken) data.accessToken = encrypt(body.accessToken);
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: "No fields to update" });
+    const result = await prisma.whatsAppNumber.updateMany({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      data,
+    });
+    if (!result.count) return res.status(404).json({ error: "Number not found" });
     res.json({ success: true });
   } catch (err) {
     next(err);

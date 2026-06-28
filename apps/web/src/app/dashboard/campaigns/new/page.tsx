@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ChevronLeft, Check, Rocket, Users, User } from "lucide-react";
+import { ChevronRight, ChevronLeft, Check, Rocket, Users } from "lucide-react";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 
@@ -17,12 +17,9 @@ interface CampaignDraft {
   type: "ONE_TIME" | "RECURRING";
   templateId?: string;
   contactListIds?: string[];
-  singlePhone?: string;
-  singleName?: string;
   scheduledAt?: string;
   timezone: string;
   rateLimit: number;
-  throttleHours?: number;
   quietHoursStart?: string;
   quietHoursEnd?: string;
 }
@@ -36,13 +33,13 @@ export default function NewCampaignPage() {
     timezone: "UTC",
     rateLimit: 60,
   });
-  const [audienceMode, setAudienceMode] = useState<"list" | "single">("list");
 
   // Pre-select number from context
   useEffect(() => {
     if (selectedNumberId && !draft.numberId) {
       setDraft((prev) => ({ ...prev, numberId: selectedNumberId }));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNumberId]);
 
   const { data: numbers = [] } = useQuery({
@@ -62,7 +59,7 @@ export default function NewCampaignPage() {
 
   const createMutation = useMutation({
     mutationFn: async (data: Partial<CampaignDraft>) => {
-      const payload: Record<string, unknown> = {
+      const campaign = await api.post("/campaigns", {
         name: data.name,
         description: data.description,
         numberId: data.numberId,
@@ -73,16 +70,8 @@ export default function NewCampaignPage() {
         scheduledAt: data.scheduledAt,
         quietHoursStart: data.quietHoursStart,
         quietHoursEnd: data.quietHoursEnd,
-      };
-
-      if (audienceMode === "single" && data.singlePhone) {
-        const phone = data.singlePhone.startsWith("+") ? data.singlePhone : `+${data.singlePhone}`;
-        payload.contacts = [{ phone, variables: { name: data.singleName || "" } }];
-      } else {
-        payload.contactListIds = data.contactListIds;
-      }
-
-      const campaign = await api.post("/campaigns", payload);
+        contactListIds: data.contactListIds,
+      });
       await api.post(`/campaigns/${campaign.data.id}/launch`);
       return campaign.data;
     },
@@ -95,8 +84,8 @@ export default function NewCampaignPage() {
   });
 
   const saveDraftMutation = useMutation({
-    mutationFn: async (data: Partial<CampaignDraft>) => {
-      const payload: Record<string, unknown> = {
+    mutationFn: async (data: Partial<CampaignDraft>) =>
+      api.post("/campaigns", {
         name: data.name,
         description: data.description,
         numberId: data.numberId,
@@ -104,10 +93,8 @@ export default function NewCampaignPage() {
         type: data.type || "ONE_TIME",
         timezone: data.timezone || "UTC",
         rateLimit: data.rateLimit || 60,
-      };
-      if (audienceMode === "list") payload.contactListIds = data.contactListIds;
-      return api.post("/campaigns", payload);
-    },
+        contactListIds: data.contactListIds,
+      }),
     onSuccess: () => { toast.success("Saved as draft"); router.push("/dashboard/campaigns"); },
   });
 
@@ -117,10 +104,7 @@ export default function NewCampaignPage() {
 
   const isValid = (s: number) => {
     if (s === 0) return !!(draft.name && draft.numberId);
-    if (s === 1) {
-      if (audienceMode === "single") return !!(draft.singlePhone);
-      return !!(draft.contactListIds?.length);
-    }
+    if (s === 1) return !!(draft.contactListIds?.length);
     if (s === 2) return !!(draft.templateId);
     return true;
   };
@@ -194,88 +178,37 @@ export default function NewCampaignPage() {
         {step === 1 && (
           <div className="space-y-4">
             <h2 className="font-semibold text-gray-900">Select Audience</h2>
-
-            {/* Mode toggle */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setAudienceMode("list")}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                  audienceMode === "list"
-                    ? "bg-primary text-white border-primary"
-                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                }`}
-              >
-                <Users className="w-4 h-4" /> Contact List
-              </button>
-              <button
-                onClick={() => setAudienceMode("single")}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                  audienceMode === "single"
-                    ? "bg-primary text-white border-primary"
-                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                }`}
-              >
-                <User className="w-4 h-4" /> Single Contact
-              </button>
+            <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-xl">
+              <Users className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <p className="text-xs text-blue-700">Select one or more contact lists to receive this campaign. To send to a single person, use the Send button on the Contacts page.</p>
             </div>
-
-            {audienceMode === "list" && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Contact Lists</label>
-                <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {lists.map((l: { id: string; name: string; _count?: { members: number } }) => (
-                    <label key={l.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                      <input
-                        type="checkbox"
-                        checked={draft.contactListIds?.includes(l.id) || false}
-                        onChange={(e) => {
-                          const ids = draft.contactListIds || [];
-                          update({ contactListIds: e.target.checked ? [...ids, l.id] : ids.filter((id) => id !== l.id) });
-                        }}
-                        className="w-4 h-4 accent-primary"
-                      />
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{l.name}</p>
-                        <p className="text-xs text-gray-500">{l._count?.members || 0} contacts</p>
-                      </div>
-                    </label>
-                  ))}
-                  {lists.length === 0 && (
-                    <p className="text-sm text-gray-400 text-center py-6">
-                      No contact lists yet. <a href="/dashboard/contacts" className="text-primary">Create one</a>.
-                    </p>
-                  )}
-                </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Contact Lists *</label>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {lists.map((l: { id: string; name: string; _count?: { members: number } }) => (
+                  <label key={l.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={draft.contactListIds?.includes(l.id) || false}
+                      onChange={(e) => {
+                        const ids = draft.contactListIds || [];
+                        update({ contactListIds: e.target.checked ? [...ids, l.id] : ids.filter((id) => id !== l.id) });
+                      }}
+                      className="w-4 h-4 accent-primary"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{l.name}</p>
+                      <p className="text-xs text-gray-500">{l._count?.members || 0} contacts</p>
+                    </div>
+                  </label>
+                ))}
+                {lists.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">
+                    No contact lists yet. <a href="/dashboard/contacts" className="text-primary">Create one</a>.
+                  </p>
+                )}
               </div>
-            )}
-
-            {audienceMode === "single" && (
-              <div className="space-y-3">
-                <div className="p-3 bg-blue-50 rounded-xl text-xs text-blue-700">
-                  Send this template directly to one person. Perfect for testing or individual notifications.
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number *</label>
-                  <input
-                    value={draft.singlePhone || ""}
-                    onChange={(e) => update({ singlePhone: e.target.value })}
-                    placeholder="+923001234567"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                  <p className="text-xs text-gray-400 mt-0.5">Include country code (e.g. +92 for Pakistan)</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name <span className="text-gray-400 font-normal">(optional)</span></label>
-                  <input
-                    value={draft.singleName || ""}
-                    onChange={(e) => update({ singleName: e.target.value })}
-                    placeholder="e.g. Ahmed Khan"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                  <p className="text-xs text-gray-400 mt-0.5">Used to replace {"{{name}}"} variable if your template uses it.</p>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -358,11 +291,9 @@ export default function NewCampaignPage() {
                 { label: "Template", value: selectedTemplate?.name || "—" },
                 {
                   label: "Audience",
-                  value: audienceMode === "single"
-                    ? `Single contact: ${draft.singlePhone || "—"}${draft.singleName ? ` (${draft.singleName})` : ""}`
-                    : selectedLists.length > 0
-                      ? selectedLists.map((l: { name: string }) => l.name).join(", ")
-                      : "—",
+                  value: selectedLists.length > 0
+                    ? selectedLists.map((l: { name: string }) => l.name).join(", ")
+                    : "—",
                 },
                 { label: "Rate Limit", value: `${draft.rateLimit} msg/min` },
                 { label: "Send At", value: draft.scheduledAt ? new Date(draft.scheduledAt).toLocaleString() : "Immediately on launch" },

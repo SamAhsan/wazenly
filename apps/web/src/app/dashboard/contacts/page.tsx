@@ -4,9 +4,10 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, FileText, AlertCircle } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, FileText, AlertCircle, Send } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials } from "@/lib/utils";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 type Contact = {
   id: string; name: string; email?: string; phone: string; tags: string[];
@@ -14,8 +15,8 @@ type Contact = {
   lastMessaged: string | null; optedOut: boolean;
 };
 type ContactList = { id: string; name: string; description?: string; _count?: { members: number } };
+type Template = { id: string; name: string; body: string; category: string; language: string };
 
-// Normalise phone: strip spaces/dashes, ensure starts with +
 function normalizePhone(raw: string): string {
   let p = raw.replace(/[\s\-().]/g, "");
   if (!p.startsWith("+")) p = "+" + p;
@@ -24,6 +25,11 @@ function normalizePhone(raw: string): string {
 
 function isValidPhone(p: string): boolean {
   return /^\+\d{7,15}$/.test(p);
+}
+
+function getBodyVars(body: string): number[] {
+  const matches = body.match(/\{\{(\d+)\}\}/g) || [];
+  return Array.from(new Set(matches.map((m) => parseInt(m.replace(/[{}]/g, ""))))).sort((a, b) => a - b);
 }
 
 type CsvRow = Record<string, string>;
@@ -45,6 +51,12 @@ export default function ContactsPage() {
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvListName, setCsvListName] = useState("");
 
+  // Send template state
+  const [sendContact, setSendContact] = useState<Contact | null>(null);
+  const [sendTemplateId, setSendTemplateId] = useState("");
+  const [sendVars, setSendVars] = useState<Record<string, string>>({});
+
+  const { selectedNumberId } = useSelectedNumber();
   const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
 
@@ -63,6 +75,12 @@ export default function ContactsPage() {
     queryKey: ["contacts", "list", activeList?.id],
     queryFn: () => api.get("/contacts", { params: { listId: activeList!.id, limit: 200 } }).then((r) => r.data),
     enabled: !!activeList,
+  });
+
+  const { data: approvedTemplates = [] } = useQuery<Template[]>({
+    queryKey: ["templates-approved", selectedNumberId],
+    queryFn: () => api.get("/templates", { params: { status: "APPROVED", numberId: selectedNumberId } }).then((r) => r.data.data || []),
+    enabled: !!selectedNumberId,
   });
 
   const { register: regContact, handleSubmit: hsContact, reset: resetContact } = useForm<{ name: string; phone: string; email?: string }>();
@@ -123,10 +141,32 @@ export default function ContactsPage() {
     onError: () => toast.error("Failed to add contacts"),
   });
 
+  const sendMutation = useMutation({
+    mutationFn: async ({ contact, templateId, variables }: { contact: Contact; templateId: string; variables: Record<string, string> }) => {
+      const campaign = await api.post("/campaigns", {
+        name: `Quick Send — ${contact.name} — ${new Date().toLocaleTimeString()}`,
+        numberId: selectedNumberId,
+        templateId,
+        type: "ONE_TIME",
+        timezone: "UTC",
+        rateLimit: 60,
+        contacts: [{ phone: contact.phone, variables }],
+      });
+      await api.post(`/campaigns/${campaign.data.id}/launch`);
+    },
+    onSuccess: () => {
+      toast.success("Message sent!");
+      setSendContact(null);
+      setSendTemplateId("");
+      setSendVars({});
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to send message"),
+  });
+
   const contacts: Contact[] = data?.data || [];
   const listContactsData: Contact[] = listContacts?.data || [];
 
-  // Parse CSV file client-side and open the naming modal
   function handleCsvFileSelect(file: File) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -150,7 +190,7 @@ export default function ContactsPage() {
         if (!isValidPhone(phone)) { errs.push(`Row ${i}: invalid phone "${rawPhone}" — will be skipped`); continue; }
 
         row._phone_normalized = phone;
-        if (!row.name) row.name = phone; // fallback name
+        if (!row.name) row.name = phone;
         rows.push(row);
       }
 
@@ -166,8 +206,6 @@ export default function ContactsPage() {
   async function confirmCsvImport() {
     if (!csvListName.trim()) { toast.error("Please enter a list name"); return; }
     if (!csvFile) return;
-
-    // First create the list, then import
     try {
       const listRes = await api.post("/contacts/lists", { name: csvListName.trim() });
       importContacts.mutate({ file: csvFile, listId: listRes.data.id });
@@ -175,6 +213,27 @@ export default function ContactsPage() {
       toast.error("Failed to create list");
     }
   }
+
+  function openSendModal(c: Contact) {
+    if (!selectedNumberId) { toast.error("Select a WhatsApp number from the top bar first"); return; }
+    setSendContact(c);
+    setSendTemplateId("");
+    setSendVars({});
+  }
+
+  function selectTemplate(id: string) {
+    setSendTemplateId(id);
+    const tpl = approvedTemplates.find((t) => t.id === id);
+    if (tpl) {
+      const vars: Record<string, string> = {};
+      getBodyVars(tpl.body).forEach((n) => { vars[String(n)] = ""; });
+      setSendVars(vars);
+    } else {
+      setSendVars({});
+    }
+  }
+
+  const selectedSendTemplate = approvedTemplates.find((t) => t.id === sendTemplateId);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-5">
@@ -193,7 +252,7 @@ export default function ContactsPage() {
             onChange={(e) => {
               if (e.target.files?.[0]) {
                 handleCsvFileSelect(e.target.files[0]);
-                e.target.value = ""; // reset so same file can be re-selected
+                e.target.value = "";
               }
             }}
           />
@@ -310,6 +369,15 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1">
+                          {!c.optedOut && (
+                            <button
+                              onClick={() => openSendModal(c)}
+                              className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                              title="Send template"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => { if (confirm("Delete contact?")) deleteContact.mutate(c.id); }}
                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -439,6 +507,80 @@ export default function ContactsPage() {
         </>
       )}
 
+      {/* ── SEND TEMPLATE MODAL ── */}
+      {sendContact && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-gray-900">Send Template</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{sendContact.name} · {sendContact.phone}</p>
+              </div>
+              <button onClick={() => setSendContact(null)}><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Template *</label>
+                {approvedTemplates.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-3 text-center">No approved templates for the selected number.</p>
+                ) : (
+                  <select
+                    value={sendTemplateId}
+                    onChange={(e) => selectTemplate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">Select a template...</option>
+                    {approvedTemplates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {selectedSendTemplate && getBodyVars(selectedSendTemplate.body).map((n) => (
+                <div key={n}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Variable {`{{${n}}}`}</label>
+                  <input
+                    value={sendVars[String(n)] || ""}
+                    onChange={(e) => setSendVars((prev) => ({ ...prev, [String(n)]: e.target.value }))}
+                    placeholder={`Value for {{${n}}}`}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+              ))}
+
+              {selectedSendTemplate && (
+                <div className="bg-gray-50 rounded-xl p-3">
+                  <p className="text-xs text-gray-400 mb-1.5">Preview</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                    {selectedSendTemplate.body.replace(/\{\{(\d+)\}\}/g, (_, n) => sendVars[n] || `{{${n}}}`)}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSendContact(null)}
+                  className="flex-1 py-2 border border-gray-200 rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!sendTemplateId || sendMutation.isPending}
+                  onClick={() => sendMutation.mutate({ contact: sendContact, templateId: sendTemplateId, variables: sendVars })}
+                  className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {sendMutation.isPending ? "Sending..." : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── CSV IMPORT MODAL ── */}
       {showCsvModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -458,7 +600,6 @@ export default function ContactsPage() {
               </button>
             </div>
 
-            {/* List name */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">List Name *</label>
               <input
@@ -470,7 +611,6 @@ export default function ContactsPage() {
               <p className="text-xs text-gray-400 mt-0.5">All contacts from this CSV will be added to this list.</p>
             </div>
 
-            {/* Errors */}
             {csvErrors.length > 0 && (
               <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
                 <div className="flex items-center gap-2 mb-1">
@@ -485,7 +625,6 @@ export default function ContactsPage() {
               </div>
             )}
 
-            {/* Preview table */}
             {csvRows.length > 0 && (
               <div className="flex-1 overflow-hidden">
                 <p className="text-xs font-medium text-gray-500 mb-2">Preview (first 5 rows)</p>
@@ -614,7 +753,7 @@ export default function ContactsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-gray-900">Add to "{activeList.name}"</h2>
+              <h2 className="font-bold text-gray-900">Add to &quot;{activeList.name}&quot;</h2>
               <button onClick={() => { setShowAddToList(false); setSelectedContacts([]); }}>
                 <X className="w-4 h-4 text-gray-400" />
               </button>

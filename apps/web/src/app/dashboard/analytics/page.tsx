@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSelectedNumber } from "@/contexts/number-context";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendingUp, TrendingDown, MessageSquare, CheckCircle2, Eye, AlertCircle, Megaphone, Users } from "lucide-react";
 import api from "@/lib/api";
@@ -37,6 +38,7 @@ function MetricCard({ title, value, sub, icon: Icon, color, trend }: { title: st
 
 export default function AnalyticsPage() {
   const [preset, setPreset] = useState(30);
+  const { selectedNumberId } = useSelectedNumber();
 
   const getDateRange = () => {
     const to = new Date().toISOString().split("T")[0];
@@ -50,20 +52,21 @@ export default function AnalyticsPage() {
   };
 
   const range = getDateRange();
+  const numberParam = selectedNumberId ? { numberId: selectedNumberId } : {};
 
   const { data: overview } = useQuery({
-    queryKey: ["analytics-overview", range],
-    queryFn: () => api.get("/analytics/overview", { params: range }).then((r) => r.data),
+    queryKey: ["analytics-overview", range, selectedNumberId],
+    queryFn: () => api.get("/analytics/overview", { params: { ...range, ...numberParam } }).then((r) => r.data),
   });
 
   const { data: daily = [] } = useQuery({
-    queryKey: ["analytics-daily", range],
-    queryFn: () => api.get("/analytics/daily", { params: range }).then((r) => r.data),
+    queryKey: ["analytics-daily", range, selectedNumberId],
+    queryFn: () => api.get("/analytics/daily", { params: { ...range, ...numberParam } }).then((r) => r.data),
   });
 
   const { data: campaigns = [] } = useQuery({
-    queryKey: ["analytics-campaigns"],
-    queryFn: () => api.get("/analytics/campaigns").then((r) => r.data),
+    queryKey: ["analytics-campaigns", selectedNumberId],
+    queryFn: () => api.get("/analytics/campaigns", { params: numberParam }).then((r) => r.data),
   });
 
   const { data: numbers = [] } = useQuery({

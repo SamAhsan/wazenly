@@ -1,17 +1,29 @@
 import { Router } from "express";
+import path from "path";
+import fs from "fs";
 import multer from "multer";
-import FormData from "form-data";
-import axios from "axios";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
 import { MetaApiService } from "../services/meta.service";
-import { decrypt, META_GRAPH_URL } from "@wazenly/shared";
+import { decrypt } from "@wazenly/shared";
 
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth, requireWorkspace);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+const UPLOADS_DIR = path.join(__dirname, "../../uploads");
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
 
 const templateSchema = z.object({
   name: z.string().regex(/^[a-z0-9_]+$/),
@@ -59,48 +71,33 @@ templatesRouter.get("/", async (req: AuthRequest, res, next) => {
   }
 });
 
-// POST /api/templates/upload-media — upload sample media file to Meta, return URL
+// POST /api/templates/upload-media — save to local disk and return a public URL
+// Meta requires a publicly accessible URL for example.header_url during template review.
+// Uploading to Meta's /media endpoint returns an auth-gated URL which Meta itself cannot read back.
 templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "File required" });
     const { numberId } = req.body as { numberId: string };
-    if (!numberId) return res.status(400).json({ error: "numberId required" });
+    if (!numberId) {
+      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
+      return res.status(400).json({ error: "numberId required" });
+    }
 
     const number = await prisma.whatsAppNumber.findFirst({
       where: { id: numberId, workspaceId: req.workspaceId! },
     });
-    if (!number) return res.status(400).json({ error: "Invalid number" });
+    if (!number) {
+      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
+      return res.status(400).json({ error: "Invalid number" });
+    }
 
-    const accessToken = decrypt(number.accessToken);
-
-    // Upload to Meta WhatsApp media endpoint
-    const form = new FormData();
-    form.append("messaging_product", "whatsapp");
-    form.append("type", req.file.mimetype);
-    form.append("file", req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
-
-    const uploadRes = await axios.post(
-      `${META_GRAPH_URL}/${number.phoneNumberId}/media`,
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-
-    const mediaId: string = uploadRes.data.id;
-
-    // Fetch the media URL
-    const mediaInfoRes = await axios.get(`${META_GRAPH_URL}/${mediaId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    const url: string = mediaInfoRes.data.url || "";
-
-    res.json({ mediaId, url });
+    const filename = (req.file as Express.Multer.File & { filename: string }).filename;
+    const publicUrl = `${process.env.WEBHOOK_BASE_URL}/uploads/${filename}`;
+    res.json({ url: publicUrl, mediaId: null });
   } catch (err) {
+    if ((req.file as (Express.Multer.File & { path?: string }) | undefined)?.path) {
+      fs.unlink((req.file as Express.Multer.File & { path: string }).path, () => {});
+    }
     next(err);
   }
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 
 interface WhatsAppNumber {
   id: string;
@@ -26,13 +26,11 @@ const NumberContext = createContext<NumberContextType>({
 });
 
 export function NumberProvider({ children }: { children: ReactNode }) {
-  const [selectedNumberId, setSelectedNumberIdState] = useState<string | null>(null);
+  const [selectedNumberId, setSelectedNumberIdState] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("wazenly_selectedNumberId");
+  });
   const [numbers, setNumbers] = useState<WhatsAppNumber[]>([]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("wazenly_selectedNumberId");
-    if (saved) setSelectedNumberIdState(saved);
-  }, []);
 
   const setSelectedNumberId = (id: string | null) => {
     setSelectedNumberIdState(id);

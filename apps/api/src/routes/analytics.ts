@@ -8,22 +8,26 @@ analyticsRouter.use(requireAuth, requireWorkspace);
 // GET /api/analytics/overview
 analyticsRouter.get("/overview", async (req: AuthRequest, res, next) => {
   try {
-    const { from, to } = req.query as { from?: string; to?: string };
+    const { from, to, numberId } = req.query as { from?: string; to?: string; numberId?: string };
     const endDate = to ? new Date(to) : new Date();
     const startDate = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const prevStart = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()));
 
+    const analyticsWhere: Record<string, unknown> = { workspaceId: req.workspaceId!, date: { gte: startDate, lte: endDate } };
+    const prevWhere: Record<string, unknown> = { workspaceId: req.workspaceId!, date: { gte: prevStart, lt: startDate } };
+    if (numberId) { analyticsWhere.numberId = numberId; prevWhere.numberId = numberId; }
+
     const [current, previous, activeCampaigns, newContacts] = await Promise.all([
       prisma.dailyAnalytics.aggregate({
-        where: { workspaceId: req.workspaceId!, date: { gte: startDate, lte: endDate } },
+        where: analyticsWhere,
         _sum: { messagesSent: true, delivered: true, read: true, failed: true, inbound: true },
       }),
       prisma.dailyAnalytics.aggregate({
-        where: { workspaceId: req.workspaceId!, date: { gte: prevStart, lt: startDate } },
+        where: prevWhere,
         _sum: { messagesSent: true },
       }),
-      prisma.campaign.count({ where: { workspaceId: req.workspaceId!, status: "RUNNING" } }),
+      prisma.campaign.count({ where: { workspaceId: req.workspaceId!, status: "RUNNING", ...(numberId ? { numberId } : {}) } }),
       prisma.contact.count({
         where: { workspaceId: req.workspaceId!, createdAt: { gte: startDate, lte: endDate } },
       }),
@@ -73,8 +77,11 @@ analyticsRouter.get("/daily", async (req: AuthRequest, res, next) => {
 // GET /api/analytics/campaigns
 analyticsRouter.get("/campaigns", async (req: AuthRequest, res, next) => {
   try {
+    const { numberId } = req.query as { numberId?: string };
+    const campaignWhere: Record<string, unknown> = { workspaceId: req.workspaceId!, status: { in: ["COMPLETED", "RUNNING"] } };
+    if (numberId) campaignWhere.numberId = numberId;
     const campaigns = await prisma.campaign.findMany({
-      where: { workspaceId: req.workspaceId!, status: { in: ["COMPLETED", "RUNNING"] } },
+      where: campaignWhere,
       select: {
         id: true, name: true, status: true,
         totalRecipients: true, sentCount: true, deliveredCount: true, readCount: true, failedCount: true,

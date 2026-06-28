@@ -6,6 +6,7 @@ import { formatNumber, pct } from "@/lib/utils";
 import { MessageSquare, Megaphone, Users, TrendingUp, TrendingDown, BarChart3, CheckCircle2, BookOpen, Phone } from "lucide-react";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 function StatCard({ title, value, change, icon: Icon, color }: {
   title: string; value: string | number; change?: number; icon: React.ElementType; color: string;
@@ -32,19 +33,21 @@ function StatCard({ title, value, change, icon: Icon, color }: {
 }
 
 export default function DashboardPage() {
+  const { selectedNumberId } = useSelectedNumber();
+
   const { data: overview } = useQuery({
-    queryKey: ["analytics-overview"],
-    queryFn: () => api.get("/analytics/overview").then((r) => r.data),
+    queryKey: ["analytics-overview", selectedNumberId],
+    queryFn: () => api.get("/analytics/overview", { params: selectedNumberId ? { numberId: selectedNumberId } : {} }).then((r) => r.data),
   });
 
   const { data: daily } = useQuery({
-    queryKey: ["analytics-daily"],
-    queryFn: () => api.get("/analytics/daily").then((r) => r.data),
+    queryKey: ["analytics-daily", selectedNumberId],
+    queryFn: () => api.get("/analytics/daily", { params: selectedNumberId ? { numberId: selectedNumberId } : {} }).then((r) => r.data),
   });
 
   const { data: campaigns } = useQuery({
-    queryKey: ["analytics-campaigns"],
-    queryFn: () => api.get("/analytics/campaigns").then((r) => r.data),
+    queryKey: ["analytics-campaigns", selectedNumberId],
+    queryFn: () => api.get("/analytics/campaigns", { params: selectedNumberId ? { numberId: selectedNumberId } : {} }).then((r) => r.data),
   });
 
   // Onboarding checklist

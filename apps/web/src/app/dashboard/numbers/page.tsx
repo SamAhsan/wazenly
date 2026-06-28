@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink } from "lucide-react";
+import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 
@@ -32,6 +32,8 @@ function EmptyState() {
 export default function NumbersPage() {
   const [showForm, setShowForm] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
   const queryClient = useQueryClient();
 
   const { data: numbers = [], isLoading } = useQuery({
@@ -61,6 +63,18 @@ export default function NumbersPage() {
       queryClient.invalidateQueries({ queryKey: ["numbers"] });
       setDeleteId(null);
     },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: (data: { phoneNumberId?: string; wabaId?: string; accessToken?: string }) =>
+      api.put(`/numbers/${editId}`, data),
+    onSuccess: () => {
+      toast.success("Number updated");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+      setEditId(null);
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) =>
+      toast.error(err.response?.data?.error || "Failed to update number"),
   });
 
   return (
@@ -113,6 +127,56 @@ export default function NumbersPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit credentials modal */}
+      {editId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-1">Edit Number Credentials</h2>
+            <p className="text-sm text-gray-500 mb-5">Update the Phone Number ID, WABA ID, or Access Token. Leave blank to keep the current value.</p>
+            <div className="space-y-4">
+              {[
+                { key: "phoneNumberId", label: "Phone Number ID", placeholder: "Current value hidden" },
+                { key: "wabaId", label: "WhatsApp Business Account ID", placeholder: "Current value hidden" },
+                { key: "accessToken", label: "Access Token", placeholder: "Enter new token (leave blank to keep)" },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                  <input
+                    value={editData[key as keyof typeof editData]}
+                    onChange={(e) => setEditData((prev) => ({ ...prev, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    type={key === "accessToken" ? "password" : "text"}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setEditId(null)}
+                className="flex-1 py-2.5 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const data: { phoneNumberId?: string; wabaId?: string; accessToken?: string } = {};
+                  if (editData.phoneNumberId) data.phoneNumberId = editData.phoneNumberId;
+                  if (editData.wabaId) data.wabaId = editData.wabaId;
+                  if (editData.accessToken) data.accessToken = editData.accessToken;
+                  editMutation.mutate(data);
+                }}
+                disabled={editMutation.isPending}
+                className="flex-1 bg-primary text-white py-2.5 rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-70"
+              >
+                {editMutation.isPending ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -185,6 +249,13 @@ export default function NumbersPage() {
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Open in Meta">
                         <ExternalLink className="w-4 h-4" />
                       </a>
+                      <button
+                        onClick={() => { setEditId(n.id); setEditData({ phoneNumberId: n.phoneNumberId, wabaId: n.wabaId, accessToken: "" }); }}
+                        className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                        title="Edit credentials"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
                       <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
                         <Trash2 className="w-4 h-4" />
                       </button>
