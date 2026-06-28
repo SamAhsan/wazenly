@@ -91,7 +91,12 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
       return res.status(400).json({ error: "Number not found in this workspace" });
     }
 
-    const publicUrl = `${process.env.WEBHOOK_BASE_URL}/uploads/${req.file.filename}`;
+    const baseUrl = process.env.WEBHOOK_BASE_URL;
+    if (!baseUrl) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(500).json({ error: "WEBHOOK_BASE_URL is not configured on the server" });
+    }
+    const publicUrl = `${baseUrl}/uploads/${req.file.filename}`;
     res.json({ url: publicUrl, mediaId: null });
   } catch (err) {
     if (req.file?.path) fs.unlink(req.file.path, () => {});
