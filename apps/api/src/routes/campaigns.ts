@@ -284,6 +284,12 @@ campaignsRouter.delete("/:id", async (req: AuthRequest, res, next) => {
 // GET /api/campaigns/:id/contacts
 campaignsRouter.get("/:id/contacts", async (req: AuthRequest, res, next) => {
   try {
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
     const { page = "1", limit = "50", status } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
 

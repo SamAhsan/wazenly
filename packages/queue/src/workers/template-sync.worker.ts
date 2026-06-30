@@ -86,7 +86,7 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
             language: t.language,
             status: t.status as any,
             headerType: (headerComponent?.format?.toUpperCase() || "NONE") as any,
-            headerText: headerComponent?.type === "TEXT" ? headerComponent.text : undefined,
+            headerText: headerComponent?.format === "TEXT" ? headerComponent.text : undefined,
             body: bodyComponent?.text || "",
             footer: footerComponent?.text,
             buttons: (buttonComponent?.buttons as any) || null,

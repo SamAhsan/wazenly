@@ -10,6 +10,21 @@ interface WebhookJobData {
   phoneNumberId: string;
 }
 
+async function upsertDailyAnalytics(
+  workspaceId: string,
+  numberId: string,
+  field: "messagesSent" | "delivered" | "read" | "failed" | "inbound" | "newContacts",
+  amount = 1
+): Promise<void> {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  await prisma.dailyAnalytics.upsert({
+    where: { workspaceId_numberId_date: { workspaceId, numberId, date: today } },
+    create: { workspaceId, numberId, date: today, [field]: amount } as any,
+    update: { [field]: { increment: amount } } as any,
+  });
+}
+
 async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
   const { payload, phoneNumberId } = job.data;
 
@@ -46,6 +61,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
                 phone: `+${msg.from}`,
               },
             });
+            await upsertDailyAnalytics(number.workspaceId, number.id, "newContacts").catch(() => {});
           }
 
           // Check opt-out
@@ -100,6 +116,8 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             },
           });
 
+          await upsertDailyAnalytics(number.workspaceId, number.id, "inbound").catch(() => {});
+
           // Dispatch outbound webhooks
           await dispatchOutboundWebhooks(number.workspaceId, "message.received", {
             phone: `+${msg.from}`,
@@ -133,6 +151,14 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             where: { metaMessageId: status.id },
             data: updateData,
           });
+
+          if (metaStatus === "delivered") {
+            await upsertDailyAnalytics(number.workspaceId, number.id, "delivered").catch(() => {});
+          } else if (metaStatus === "read") {
+            await upsertDailyAnalytics(number.workspaceId, number.id, "read").catch(() => {});
+          } else if (metaStatus === "failed") {
+            await upsertDailyAnalytics(number.workspaceId, number.id, "failed").catch(() => {});
+          }
 
           // Update campaign contact status (if this message belongs to a campaign)
           if (updateData.status) {

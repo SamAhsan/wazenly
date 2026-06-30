@@ -110,7 +110,24 @@ export default function CampaignDetailPage() {
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">Contact Status</h3>
-            <button className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700">
+            <button
+              onClick={() => {
+                const rows = contacts?.data || [];
+                if (!rows.length) return;
+                const header = "Phone,Status,Sent At,Read At,Error";
+                const csv = [header, ...rows.map((cc: { phone: string; status: string; sentAt: string | null; readAt: string | null; errorMessage: string | null }) =>
+                  [cc.phone, cc.status, cc.sentAt || "", cc.readAt || "", cc.errorMessage || ""].join(",")
+                )].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `campaign-${id}-contacts.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700"
+            >
               <Download className="w-3.5 h-3.5" /> Export CSV
             </button>
           </div>

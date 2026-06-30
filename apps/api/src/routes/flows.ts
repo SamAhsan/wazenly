@@ -90,44 +90,63 @@ flowsRouter.put("/:id", async (req: AuthRequest, res, next) => {
   try {
     const body = flowSchema.parse(req.body);
 
-    // Delete and recreate nodes/edges for simplicity
+    // Delete existing nodes (edges cascade) and triggers
     await prisma.$transaction([
       prisma.flowNode.deleteMany({ where: { flowId: req.params.id } }),
       prisma.flowTrigger.deleteMany({ where: { flowId: req.params.id } }),
     ]);
 
-    const flow = await prisma.flow.update({
+    // Update flow metadata and triggers
+    await prisma.flow.update({
       where: { id: req.params.id },
       data: {
         name: body.name,
         description: body.description,
         numberId: body.numberId,
-        nodes: body.nodes?.length
-          ? { create: body.nodes.map((n) => ({ ...n, data: n.data as any })) }
-          : undefined,
         triggers: body.triggers?.length
           ? { create: body.triggers.map((t) => ({ type: t.type, keywords: t.keywords || [] })) }
           : undefined,
       },
-      include: { nodes: true, edges: true, triggers: true },
     });
 
-    // Re-create edges after nodes are created
+    // Create nodes one-by-one to track React Flow client ID → DB UUID mapping
+    const nodeIdMap = new Map<string, string>();
+    if (body.nodes?.length) {
+      for (const n of body.nodes) {
+        const dbNode = await prisma.flowNode.create({
+          data: {
+            flowId: req.params.id,
+            type: n.type,
+            label: n.label,
+            positionX: n.positionX,
+            positionY: n.positionY,
+            data: n.data as any,
+          },
+          select: { id: true },
+        });
+        nodeIdMap.set(n.id, dbNode.id);
+      }
+    }
+
+    // Create edges using mapped DB IDs (edges carry React Flow node IDs from client)
     if (body.edges?.length) {
-      const nodeMap = new Map(flow.nodes.map((n) => [n.id, n.id]));
       await prisma.flowEdge.createMany({
         data: body.edges
-          .filter((e) => nodeMap.has(e.sourceNodeId) && nodeMap.has(e.targetNodeId))
+          .filter((e) => nodeIdMap.has(e.sourceNodeId) && nodeIdMap.has(e.targetNodeId))
           .map((e) => ({
             flowId: req.params.id,
-            sourceNodeId: e.sourceNodeId,
-            targetNodeId: e.targetNodeId,
+            sourceNodeId: nodeIdMap.get(e.sourceNodeId)!,
+            targetNodeId: nodeIdMap.get(e.targetNodeId)!,
             label: e.label,
             condition: e.condition as any,
           })),
       });
     }
 
+    const flow = await prisma.flow.findFirst({
+      where: { id: req.params.id },
+      include: { nodes: true, edges: true, triggers: true },
+    });
     res.json(flow);
   } catch (err) {
     next(err);

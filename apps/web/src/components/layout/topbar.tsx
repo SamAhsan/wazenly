@@ -114,8 +114,8 @@ export function TopBar() {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-20">
-                <a href="/dashboard/settings/profile" className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
-                  <User className="w-4 h-4 text-gray-400" /> Profile
+                <a href="/dashboard/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
+                  <User className="w-4 h-4 text-gray-400" /> Profile & Settings
                 </a>
                 <a href="/dashboard/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50">
                   <Settings className="w-4 h-4 text-gray-400" /> Settings

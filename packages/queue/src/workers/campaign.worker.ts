@@ -54,6 +54,21 @@ async function isInQuietHours(quietStart: string | null, quietEnd: string | null
   return now >= quietStart && now <= quietEnd;
 }
 
+async function upsertDailyAnalytics(
+  workspaceId: string,
+  numberId: string,
+  field: "messagesSent" | "delivered" | "read" | "failed" | "inbound" | "newContacts",
+  amount = 1
+): Promise<void> {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  await prisma.dailyAnalytics.upsert({
+    where: { workspaceId_numberId_date: { workspaceId, numberId, date: today } },
+    create: { workspaceId, numberId, date: today, [field]: amount } as any,
+    update: { [field]: { increment: amount } } as any,
+  });
+}
+
 async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
   const { campaignId, workspaceId, numberId, batchOffset, batchSize } = job.data;
 
@@ -152,6 +167,7 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
         data: { status: "SENT", messageId: msgId, sentAt: new Date() },
       });
       sentCount++;
+      await upsertDailyAnalytics(workspaceId, campaign.number.id, "messagesSent").catch(() => {});
 
       // Rate limit delay
       await new Promise((r) => setTimeout(r, delayMs));

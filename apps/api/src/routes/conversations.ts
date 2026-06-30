@@ -62,6 +62,12 @@ conversationsRouter.get("/:id/messages", async (req: AuthRequest, res, next) => 
   try {
     const { cursor, limit = "50" } = req.query as Record<string, string>;
 
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+
     const messages = await prisma.message.findMany({
       where: { conversationId: req.params.id },
       orderBy: { timestamp: "desc" },
@@ -119,6 +125,11 @@ conversationsRouter.post("/:id/reopen", async (req: AuthRequest, res, next) => {
 conversationsRouter.post("/:id/notes", async (req: AuthRequest, res, next) => {
   try {
     const { body } = z.object({ body: z.string().min(1) }).parse(req.body);
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     const note = await prisma.conversationNote.create({
       data: { conversationId: req.params.id, userId: req.userId!, body },
       include: { user: { select: { id: true, name: true, image: true } } },
@@ -132,6 +143,11 @@ conversationsRouter.post("/:id/notes", async (req: AuthRequest, res, next) => {
 // GET /api/conversations/:id/notes
 conversationsRouter.get("/:id/notes", async (req: AuthRequest, res, next) => {
   try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     const notes = await prisma.conversationNote.findMany({
       where: { conversationId: req.params.id },
       include: { user: { select: { id: true, name: true, image: true } } },

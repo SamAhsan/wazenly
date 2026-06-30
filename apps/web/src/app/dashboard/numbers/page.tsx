@@ -10,6 +10,15 @@ import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pen
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 
+function useSyncTemplates() {
+  return useMutation({
+    mutationFn: (numberId: string) => api.post("/templates/sync", { numberId }),
+    onSuccess: (r) => toast.success(r.data.message || "Templates synced"),
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to sync templates"),
+  });
+}
+
 const numberSchema = z.object({
   phoneNumberId: z.string().min(1, "Required"),
   wabaId: z.string().min(1, "Required"),
@@ -35,6 +44,7 @@ export default function NumbersPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
   const queryClient = useQueryClient();
+  const syncMutation = useSyncTemplates();
 
   const { data: numbers = [], isLoading } = useQuery({
     queryKey: ["numbers"],
@@ -242,8 +252,13 @@ export default function NumbersPage() {
                   <td className="px-5 py-4 text-sm text-gray-500">{formatRelativeTime(n.createdAt)}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">
-                      <button className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Sync templates">
-                        <RefreshCw className="w-4 h-4" />
+                      <button
+                        onClick={() => syncMutation.mutate(n.id)}
+                        disabled={syncMutation.isPending}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Sync templates from Meta"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                       </button>
                       <a href={`https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${n.wabaId}`} target="_blank" rel="noreferrer"
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Open in Meta">
