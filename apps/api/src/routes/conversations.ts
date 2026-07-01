@@ -64,12 +64,12 @@ conversationsRouter.get("/:id/messages", async (req: AuthRequest, res, next) => 
 
     const conversation = await prisma.conversation.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
-      select: { id: true },
+      select: { id: true, numberId: true },
     });
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
 
     const messages = await prisma.message.findMany({
-      where: { conversationId: req.params.id },
+      where: { conversationId: req.params.id, numberId: conversation.numberId },
       orderBy: { timestamp: "desc" },
       take: Number(limit),
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

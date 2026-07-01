@@ -236,9 +236,9 @@ export default function ContactsPage() {
   const selectedSendTemplate = approvedTemplates.find((t) => t.id === sendTemplateId);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
           <p className="text-gray-500 text-sm mt-1">{data?.total || 0} total contacts · {lists.length} lists</p>
@@ -330,7 +330,8 @@ export default function ContactsPage() {
 
           {contacts.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-              <table className="w-full">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[600px]">
                 <thead>
                   <tr className="border-b border-gray-100 text-xs text-gray-500 font-medium">
                     <th className="text-left px-5 py-3.5">Contact</th>
@@ -395,6 +396,7 @@ export default function ContactsPage() {
                   Showing {contacts.length} of {data.total} contacts
                 </div>
               )}
+              </div>
             </div>
           )}
         </>

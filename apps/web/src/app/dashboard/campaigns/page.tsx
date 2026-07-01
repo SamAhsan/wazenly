@@ -99,7 +99,8 @@ export default function CampaignsPage() {
       {/* Table */}
       {campaigns.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px]">
             <thead>
               <tr className="border-b border-gray-100 text-xs text-gray-500 font-medium">
                 <th className="text-left px-5 py-3.5">Campaign</th>
@@ -164,6 +165,7 @@ export default function CampaignsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

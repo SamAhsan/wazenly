@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { Bell, ChevronDown, LogOut, Settings, User, Phone, CheckCircle } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Settings, User, Phone, CheckCircle, Menu } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -10,7 +10,7 @@ import { useSelectedNumber } from "@/contexts/number-context";
 
 type WhatsAppNumber = { id: string; displayName: string; phoneNumber: string; status: string };
 
-export function TopBar() {
+export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
   const [numberMenuOpen, setNumberMenuOpen] = useState(false);
@@ -36,7 +36,16 @@ export function TopBar() {
   }, [connectedNumbers, selectedNumber, setSelectedNumberId]);
 
   return (
-    <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0">
+    <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 sm:px-6 flex-shrink-0">
+      {/* Hamburger — mobile only */}
+      <button
+        onClick={onMenuClick}
+        className="lg:hidden p-2 mr-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+        aria-label="Open menu"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* Number selector */}
       <div className="relative">
         {connectedNumbers.length > 0 ? (
