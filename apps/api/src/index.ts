@@ -56,7 +56,13 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Uploaded media (public) ──────────────────────────────
 const UPLOADS_DIR = path.join(__dirname, "../uploads");
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/uploads", express.static(UPLOADS_DIR, {
+  setHeaders: (res) => {
+    // Allow cross-origin access so browsers and Meta's crawler can fetch uploaded media
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  },
+}));
 
 // ─── Routes ───────────────────────────────────────────────
 app.use("/api/auth", authRouter);

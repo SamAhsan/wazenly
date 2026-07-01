@@ -106,6 +106,10 @@ export default function NewTemplatePage() {
   }
 
   function onSubmit(d: TemplateForm) {
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(d.headerType) && !headerUrl) {
+      toast.error("Please upload a sample file or paste a public URL for the header — Meta requires an example for media templates");
+      return;
+    }
     createMutation.mutate({
       ...d,
       headerUrl: headerUrl || undefined,

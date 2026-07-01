@@ -158,6 +158,7 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
 
     let metaId: string | undefined;
     try {
+      console.log("[Templates] Sending to Meta wabaId=%s components=%s", number.wabaId, JSON.stringify(components));
       const result = await meta.createTemplate(number.wabaId, {
         name: body.name,
         category: body.category,
