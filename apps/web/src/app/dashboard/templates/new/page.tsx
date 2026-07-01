@@ -32,20 +32,21 @@ export default function NewTemplatePage() {
   const router = useRouter();
   const { selectedNumberId } = useSelectedNumber();
   const [buttons, setButtons] = useState<Button[]>([]);
-  const [headerUrl, setHeaderUrl] = useState("");
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [bodyExamples, setBodyExamples] = useState<Record<string, string>>({});
   const mediaFileRef = useRef<HTMLInputElement>(null);
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<TemplateForm>({
-    defaultValues: { language: "en", headerType: "NONE", category: "MARKETING", numberId: selectedNumberId || "" },
+    defaultValues: { language: "en", headerType: "NONE", category: "MARKETING", numberId: selectedNumberId || "", headerUrl: "" },
   });
 
   const headerType = watch("headerType");
   const body = watch("body") || "";
   const headerText = watch("headerText") || "";
   const numberId = watch("numberId");
+  // Track headerUrl via react-hook-form so it's always in the form data at submit time
+  const headerUrl = watch("headerUrl") || "";
 
   // Auto-fill numberId when context changes
   if (selectedNumberId && !numberId) setValue("numberId", selectedNumberId);
@@ -86,7 +87,7 @@ export default function NewTemplatePage() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       const url = res.data.url;
-      setHeaderUrl(url);
+      setValue("headerUrl", url);
       // Show image preview
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
@@ -106,13 +107,12 @@ export default function NewTemplatePage() {
   }
 
   function onSubmit(d: TemplateForm) {
-    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(d.headerType) && !headerUrl) {
-      toast.error("Please upload a sample file or paste a public URL for the header — Meta requires an example for media templates");
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(d.headerType) && !d.headerUrl) {
+      toast.error("Please upload a sample file or paste a public URL — Meta requires an example image/file for this header type");
       return;
     }
     createMutation.mutate({
       ...d,
-      headerUrl: headerUrl || undefined,
       buttons,
       bodyExamples: Object.keys(bodyExamples).length > 0 ? bodyExamples : undefined,
     });
@@ -247,7 +247,7 @@ export default function NewTemplatePage() {
                     <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input
                       value={headerUrl}
-                      onChange={(e) => { setHeaderUrl(e.target.value); setMediaPreview(null); }}
+                      onChange={(e) => { setValue("headerUrl", e.target.value); setMediaPreview(null); }}
                       placeholder={`https://example.com/sample.${headerType === "IMAGE" ? "jpg" : headerType === "VIDEO" ? "mp4" : "pdf"}`}
                       className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />

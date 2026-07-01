@@ -156,6 +156,13 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
       });
     }
 
+    // Validate example URL is present for media headers — Meta requires it
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && !body.headerUrl) {
+      return res.status(400).json({
+        error: "An example URL is required for IMAGE/VIDEO/DOCUMENT headers. Upload a sample file or provide a public URL.",
+      });
+    }
+
     let metaId: string | undefined;
     try {
       console.log("[Templates] Sending to Meta wabaId=%s components=%s", number.wabaId, JSON.stringify(components));
