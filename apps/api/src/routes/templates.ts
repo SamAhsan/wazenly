@@ -165,8 +165,19 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
         components,
       }) as { id: string };
       metaId = result.id;
-    } catch {
-      return res.status(400).json({ error: "Failed to submit template to Meta. Check template content and try again." });
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { error?: { message?: string; code?: number; error_user_msg?: string } } }; message?: string };
+      const metaMsg = axErr.response?.data?.error?.error_user_msg
+        || axErr.response?.data?.error?.message
+        || axErr.message
+        || "Unknown error";
+      const metaCode = axErr.response?.data?.error?.code;
+      console.error("[Templates] Meta createTemplate failed:", JSON.stringify(axErr.response?.data || axErr.message));
+      return res.status(400).json({
+        error: `Meta rejected the template: ${metaMsg}`,
+        metaCode,
+        metaDetails: axErr.response?.data,
+      });
     }
 
     const template = await prisma.template.create({
