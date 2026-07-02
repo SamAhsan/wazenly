@@ -120,6 +120,19 @@ export class MetaApiService {
     return { id: response.data.id };
   }
 
+  // Resumable Upload API — required to get a header_handle for IMAGE/VIDEO/DOCUMENT
+  // template examples. A public header_url is NOT accepted by message_templates.
+  async uploadResumableMedia(appId: string, fileBuffer: Buffer, fileType: string, fileName: string): Promise<string> {
+    const session = await axios.post(`${META_GRAPH_URL}/${appId}/uploads`, null, {
+      params: { file_name: fileName, file_length: fileBuffer.length, file_type: fileType, access_token: this.accessToken },
+    });
+    const uploadSessionId = session.data.id as string;
+    const upload = await axios.post(`${META_GRAPH_URL}/${uploadSessionId}`, fileBuffer, {
+      headers: { Authorization: `OAuth ${this.accessToken}`, file_offset: "0" },
+    });
+    return upload.data.h as string;
+  }
+
   async markAsRead(messageId: string): Promise<void> {
     await axios.post(
       `${META_GRAPH_URL}/${this.phoneNumberId}/messages`,

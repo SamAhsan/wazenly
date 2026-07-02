@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { ChevronLeft, Plus, Trash2, Upload, Link as LinkIcon, Loader2 } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Upload, FileText, Clock, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 
@@ -17,8 +17,22 @@ interface TemplateForm {
   headerType: string;
   headerText?: string;
   headerUrl?: string;
+  headerHandle?: string;
   body: string;
   footer?: string;
+}
+
+// Meta's confirmed limits for template header samples
+const MEDIA_LIMITS: Record<string, { accept: string; maxBytes: number; label: string }> = {
+  IMAGE: { accept: "image/jpeg,image/png", maxBytes: 5 * 1024 * 1024, label: "JPG or PNG. Max 5 MB." },
+  VIDEO: { accept: "video/mp4,video/3gpp", maxBytes: 16 * 1024 * 1024, label: "MP4 or 3GPP. Max 16 MB." },
+  DOCUMENT: { accept: "application/pdf", maxBytes: 100 * 1024 * 1024, label: "PDF only. Max 100 MB." },
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 interface Button {
@@ -34,19 +48,22 @@ export default function NewTemplatePage() {
   const [buttons, setButtons] = useState<Button[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaFileInfo, setMediaFileInfo] = useState<{ name: string; size: number; duration?: number } | null>(null);
   const [bodyExamples, setBodyExamples] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const mediaFileRef = useRef<HTMLInputElement>(null);
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<TemplateForm>({
-    defaultValues: { language: "en", headerType: "NONE", category: "MARKETING", numberId: selectedNumberId || "", headerUrl: "" },
+    defaultValues: { language: "en", headerType: "NONE", category: "MARKETING", numberId: selectedNumberId || "", headerUrl: "", headerHandle: "" },
   });
 
   const headerType = watch("headerType");
   const body = watch("body") || "";
   const headerText = watch("headerText") || "";
   const numberId = watch("numberId");
-  // Track headerUrl via react-hook-form so it's always in the form data at submit time
+  // Track headerUrl/headerHandle via react-hook-form so they're always in the form data at submit time
   const headerUrl = watch("headerUrl") || "";
+  const headerHandle = watch("headerHandle") || "";
 
   // Auto-fill numberId when context changes
   if (selectedNumberId && !numberId) setValue("numberId", selectedNumberId);
@@ -60,14 +77,17 @@ export default function NewTemplatePage() {
   const bodyVarNums = Array.from(new Set((body.match(/\{\{(\d+)\}\}/g) || []).map((m) => parseInt(m.replace(/[{}]/g, ""))))).sort((a, b) => a - b);
 
   const createMutation = useMutation({
-    mutationFn: (d: TemplateForm & { buttons?: Button[]; headerUrl?: string; bodyExamples?: Record<string, string> }) =>
+    mutationFn: (d: TemplateForm & { buttons?: Button[]; bodyExamples?: Record<string, string> }) =>
       api.post("/templates", d),
     onSuccess: () => {
       toast.success("Template submitted for Meta approval");
       router.push("/dashboard/templates");
     },
-    onError: (e: { response?: { data?: { error?: string } } }) =>
-      toast.error(e.response?.data?.error || "Failed to create template"),
+    onError: (e: { response?: { data?: { error?: string } } }) => {
+      const msg = e.response?.data?.error || "Failed to create template";
+      setSubmitError(msg);
+      toast.error(msg);
+    },
   });
 
   const addButton = () => setButtons([...buttons, { type: "QUICK_REPLY", text: "" }]);
@@ -76,9 +96,25 @@ export default function NewTemplatePage() {
     setButtons(buttons.map((b, idx) => idx === i ? { ...b, [field]: value } : b));
   };
 
+  function getVideoDuration(file: File): Promise<number | undefined> {
+    return new Promise((resolve) => {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.onloadedmetadata = () => { resolve(video.duration); URL.revokeObjectURL(video.src); };
+      video.onerror = () => resolve(undefined);
+      video.src = URL.createObjectURL(file);
+    });
+  }
+
   async function handleMediaFileUpload(file: File) {
     if (!numberId) { toast.error("Select a WhatsApp number first"); return; }
+    const limits = MEDIA_LIMITS[headerType];
+    if (limits && file.size > limits.maxBytes) {
+      toast.error(`File too large — ${limits.label}`);
+      return;
+    }
     setUploadingMedia(true);
+    setValue("headerHandle", "");
     try {
       const form = new FormData();
       form.append("file", file);
@@ -86,17 +122,23 @@ export default function NewTemplatePage() {
       const res = await api.post("/templates/upload-media", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      const url = res.data.url;
-      setValue("headerUrl", url);
-      // Show image preview
+      setValue("headerUrl", res.data.url);
+      setValue("headerHandle", res.data.handle);
+
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
         reader.onload = (e) => setMediaPreview(e.target?.result as string);
         reader.readAsDataURL(file);
+        setMediaFileInfo({ name: file.name, size: file.size });
+      } else if (file.type.startsWith("video/")) {
+        setMediaPreview(null);
+        const duration = await getVideoDuration(file);
+        setMediaFileInfo({ name: file.name, size: file.size, duration });
       } else {
         setMediaPreview(null);
+        setMediaFileInfo({ name: file.name, size: file.size });
       }
-      toast.success("File uploaded");
+      toast.success("File uploaded and sent to Meta");
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string }; status?: number } };
       const msg = err?.response?.data?.error || "Upload failed";
@@ -107,8 +149,9 @@ export default function NewTemplatePage() {
   }
 
   function onSubmit(d: TemplateForm) {
-    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(d.headerType) && !d.headerUrl) {
-      toast.error("Please upload a sample file or paste a public URL — Meta requires an example image/file for this header type");
+    setSubmitError(null);
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(d.headerType) && !d.headerHandle) {
+      toast.error("Please upload a sample file — Meta requires an example for this header type");
       return;
     }
     createMutation.mutate({
@@ -209,17 +252,13 @@ export default function NewTemplatePage() {
                 {/* File Upload */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Upload Sample {headerType === "IMAGE" ? "Image" : headerType === "VIDEO" ? "Video" : "Document"}
+                    Upload Sample {headerType === "IMAGE" ? "Image" : headerType === "VIDEO" ? "Video" : "Document"} *
                   </label>
                   <input
                     ref={mediaFileRef}
                     type="file"
                     className="hidden"
-                    accept={
-                      headerType === "IMAGE" ? "image/jpeg,image/png,image/gif,image/webp" :
-                      headerType === "VIDEO" ? "video/mp4,video/3gp" :
-                      ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
-                    }
+                    accept={MEDIA_LIMITS[headerType]?.accept}
                     onChange={(e) => { if (e.target.files?.[0]) handleMediaFileUpload(e.target.files[0]); }}
                   />
                   <button
@@ -231,28 +270,7 @@ export default function NewTemplatePage() {
                     {uploadingMedia ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                     {uploadingMedia ? "Uploading..." : `Choose ${headerType === "IMAGE" ? "Image" : headerType === "VIDEO" ? "Video" : "Document"}`}
                   </button>
-                  {headerType === "IMAGE" && <p className="text-xs text-gray-400 mt-1">JPG, PNG or WEBP. Max 5 MB.</p>}
-                  {headerType === "VIDEO" && <p className="text-xs text-gray-400 mt-1">MP4 or 3GP. Max 16 MB.</p>}
-                  {headerType === "DOCUMENT" && <p className="text-xs text-gray-400 mt-1">PDF, DOC, DOCX, XLS, XLSX, PPT, TXT. Max 100 MB.</p>}
-                </div>
-
-                {/* Or paste URL */}
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gray-200" />
-                  <span className="text-xs text-gray-400">or paste a public URL</span>
-                  <div className="flex-1 h-px bg-gray-200" />
-                </div>
-                <div>
-                  <div className="relative">
-                    <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <input
-                      value={headerUrl}
-                      onChange={(e) => { setValue("headerUrl", e.target.value); setMediaPreview(null); }}
-                      placeholder={`https://example.com/sample.${headerType === "IMAGE" ? "jpg" : headerType === "VIDEO" ? "mp4" : "pdf"}`}
-                      className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">Must be a publicly accessible URL. Used as example for Meta review.</p>
+                  <p className="text-xs text-gray-400 mt-1">{MEDIA_LIMITS[headerType]?.label} Required — Meta needs a real sample to review this template.</p>
                 </div>
 
                 {/* Image preview */}
@@ -261,10 +279,36 @@ export default function NewTemplatePage() {
                     <img src={mediaPreview} alt="Preview" className="max-h-32 rounded-lg border border-gray-200 object-contain" />
                   </div>
                 )}
-                {headerUrl && !mediaPreview && headerType === "IMAGE" && (
-                  <div className="mt-2">
-                    <img src={headerUrl} alt="Preview" className="max-h-32 rounded-lg border border-gray-200 object-contain" onError={() => {}} />
+
+                {/* Video preview: filename + duration */}
+                {headerType === "VIDEO" && mediaFileInfo && (
+                  <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600">
+                    <FileText className="w-3.5 h-3.5 text-gray-400" />
+                    <span className="truncate">{mediaFileInfo.name}</span>
+                    <span className="text-gray-300">·</span>
+                    <span>{formatBytes(mediaFileInfo.size)}</span>
+                    {mediaFileInfo.duration !== undefined && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <Clock className="w-3.5 h-3.5 text-gray-400" />
+                        <span>{mediaFileInfo.duration.toFixed(1)}s</span>
+                      </>
+                    )}
                   </div>
+                )}
+
+                {/* Document preview: filename */}
+                {headerType === "DOCUMENT" && mediaFileInfo && (
+                  <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600">
+                    <FileText className="w-3.5 h-3.5 text-gray-400" />
+                    <span className="truncate">{mediaFileInfo.name}</span>
+                    <span className="text-gray-300">·</span>
+                    <span>{formatBytes(mediaFileInfo.size)}</span>
+                  </div>
+                )}
+
+                {headerHandle && (
+                  <p className="text-xs text-green-600">Uploaded to Meta — ready to submit.</p>
                 )}
               </div>
             )}
@@ -420,14 +464,25 @@ export default function NewTemplatePage() {
           </div>
         </div>
 
+        {submitError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {submitError}
+          </div>
+        )}
+
         <div className="flex gap-3">
           <button type="button" onClick={() => router.back()} className="flex-1 py-2.5 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50">
             Cancel
           </button>
           <button
             type="submit"
-            disabled={createMutation.isPending}
-            className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-70"
+            disabled={
+              createMutation.isPending ||
+              uploadingMedia ||
+              (headerType === "TEXT" && !headerText) ||
+              (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType) && !headerHandle)
+            }
+            className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-50"
           >
             {createMutation.isPending ? "Submitting..." : "Submit for Approval"}
           </button>

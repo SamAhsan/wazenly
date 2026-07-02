@@ -221,6 +221,7 @@ model Template {
   headerType   TemplateHeaderType @default(NONE)
   headerText   String?
   headerUrl    String?
+  headerHandle String?
   body         String            @db.Text
   footer       String?
   buttons      Json?

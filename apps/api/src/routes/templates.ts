@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
 import { MetaApiService } from "../services/meta.service";
+import { buildTemplateComponents } from "../services/template-payload";
 import { decrypt } from "@wazenly/shared";
 
 export const templatesRouter = Router();
@@ -33,6 +34,7 @@ const templateSchema = z.object({
   headerType: z.enum(["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "LOCATION"]).default("NONE"),
   headerText: z.string().optional(),
   headerUrl: z.string().optional(),
+  headerHandle: z.string().optional(),
   body: z.string().min(1).max(1024),
   footer: z.string().max(60).optional(),
   buttons: z.array(z.object({
@@ -71,9 +73,10 @@ templatesRouter.get("/", async (req: AuthRequest, res, next) => {
   }
 });
 
-// POST /api/templates/upload-media — save to local disk and return a public URL
-// Meta requires a publicly accessible URL for example.header_url during template review.
-// Uploading to Meta's /media endpoint returns an auth-gated URL which Meta itself cannot read back.
+// POST /api/templates/upload-media — save to local disk (for our own preview),
+// then push the file to Meta via the Resumable Upload API to get a header_handle.
+// Meta's message_templates endpoint only accepts example.header_handle — a
+// header_url is silently ignored, which is why templates were failing review.
 templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "File required" });
@@ -96,8 +99,30 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
       fs.unlink(req.file.path, () => {});
       return res.status(500).json({ error: "WEBHOOK_BASE_URL is not configured on the server" });
     }
+    const appId = process.env.META_APP_ID;
+    if (!appId) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(500).json({ error: "META_APP_ID is not configured on the server" });
+    }
+
+    const accessToken = decrypt(number.accessToken);
+    const meta = new MetaApiService(accessToken, number.phoneNumberId);
+    const fileBuffer = fs.readFileSync(req.file.path);
+
+    let handle: string;
+    try {
+      handle = await meta.uploadResumableMedia(appId, fileBuffer, req.file.mimetype, req.file.originalname);
+      console.log("[Templates] Resumable upload succeeded, handle=%s", handle);
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { error?: { message?: string; error_user_msg?: string } } }; message?: string };
+      const metaMsg = axErr.response?.data?.error?.error_user_msg || axErr.response?.data?.error?.message || axErr.message || "Unknown error";
+      console.error("[Templates] Resumable upload failed:", JSON.stringify(axErr.response?.data || axErr.message));
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: `Meta rejected the media upload: ${metaMsg}` });
+    }
+
     const publicUrl = `${baseUrl}/uploads/${req.file.filename}`;
-    res.json({ url: publicUrl, mediaId: null });
+    res.json({ url: publicUrl, handle });
   } catch (err) {
     if (req.file?.path) fs.unlink(req.file.path, () => {});
     next(err);
@@ -114,54 +139,17 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
     });
     if (!number) return res.status(400).json({ error: "Invalid number" });
 
+    // Validate the media handle is present for media headers — Meta requires it,
+    // and it can only come from a completed Resumable Upload (see /upload-media).
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && !body.headerHandle) {
+      return res.status(400).json({
+        error: "A sample file is required for IMAGE/VIDEO/DOCUMENT headers. Upload one before submitting.",
+      });
+    }
+
     const accessToken = decrypt(number.accessToken);
     const meta = new MetaApiService(accessToken, number.phoneNumberId);
-
-    // Build Meta template components
-    const components: object[] = [];
-
-    if (body.headerType !== "NONE") {
-      const headerComp: Record<string, unknown> = { type: "HEADER", format: body.headerType };
-      if (body.headerType === "TEXT" && body.headerText) {
-        headerComp.text = body.headerText;
-      } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && body.headerUrl) {
-        // Include example URL for Meta review — speeds up approval
-        headerComp.example = { header_url: [body.headerUrl] };
-      }
-      components.push(headerComp);
-    }
-
-    // Body with variable examples if provided
-    const bodyComp: Record<string, unknown> = { type: "BODY", text: body.body };
-    if (body.bodyExamples && Object.keys(body.bodyExamples).length > 0) {
-      // Meta expects [[val1, val2, ...]] — one array per message sample
-      const sortedKeys = Object.keys(body.bodyExamples).sort((a, b) => Number(a) - Number(b));
-      const exampleValues = sortedKeys.map((k) => body.bodyExamples![k]).filter(Boolean);
-      if (exampleValues.length > 0) {
-        bodyComp.example = { body_text: [exampleValues] };
-      }
-    }
-    components.push(bodyComp);
-
-    if (body.footer) components.push({ type: "FOOTER", text: body.footer });
-    if (body.buttons?.length) {
-      components.push({
-        type: "BUTTONS",
-        buttons: body.buttons.map((b) => ({
-          type: b.type,
-          text: b.text,
-          ...(b.url ? { url: b.url } : {}),
-          ...(b.phone_number ? { phone_number: b.phone_number } : {}),
-        })),
-      });
-    }
-
-    // Validate example URL is present for media headers — Meta requires it
-    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && !body.headerUrl) {
-      return res.status(400).json({
-        error: "An example URL is required for IMAGE/VIDEO/DOCUMENT headers. Upload a sample file or provide a public URL.",
-      });
-    }
+    const components = buildTemplateComponents(body);
 
     let metaId: string | undefined;
     try {
@@ -173,6 +161,7 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
         components,
       }) as { id: string };
       metaId = result.id;
+      console.log("[Templates] Meta createTemplate succeeded id=%s", metaId);
     } catch (err: unknown) {
       const axErr = err as { response?: { data?: { error?: { message?: string; code?: number; error_user_msg?: string } } }; message?: string };
       const metaMsg = axErr.response?.data?.error?.error_user_msg
@@ -200,6 +189,7 @@ templatesRouter.post("/", async (req: AuthRequest, res, next) => {
         headerType: body.headerType,
         headerText: body.headerText,
         headerUrl: body.headerUrl,
+        headerHandle: body.headerHandle,
         body: body.body,
         footer: body.footer,
         buttons: (body.buttons as any) ?? null,
