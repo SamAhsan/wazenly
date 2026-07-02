@@ -52,6 +52,14 @@ numbersRouter.post("/", async (req: AuthRequest, res, next) => {
     const verifyToken = crypto.randomBytes(32).toString("hex");
     const webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta/${body.phoneNumberId}`;
 
+    // Resolve which Meta App this token belongs to — required for the Resumable
+    // Upload API used by template media headers. Different numbers can be
+    // connected through different Meta Apps/Business accounts.
+    const metaAppId = await meta.debugToken();
+    if (!metaAppId) {
+      console.warn("[Numbers] Could not resolve Meta App ID from access token — media template uploads for this number will fall back to META_APP_ID env var.");
+    }
+
     const number = await prisma.whatsAppNumber.create({
       data: {
         workspaceId: req.workspaceId!,
@@ -60,6 +68,7 @@ numbersRouter.post("/", async (req: AuthRequest, res, next) => {
         phoneNumberId: body.phoneNumberId,
         wabaId: body.wabaId,
         accessToken: encrypt(body.accessToken),
+        metaAppId,
         webhookVerifyToken: verifyToken,
         status: "CONNECTED",
       },
@@ -112,11 +121,15 @@ numbersRouter.put("/:id", async (req: AuthRequest, res, next) => {
       accessToken: z.string().optional(),
     });
     const body = schema.parse(req.body);
-    const data: Record<string, string> = {};
+    const data: Record<string, string | null> = {};
     if (body.displayName) data.displayName = body.displayName;
     if (body.phoneNumberId) data.phoneNumberId = body.phoneNumberId;
     if (body.wabaId) data.wabaId = body.wabaId;
-    if (body.accessToken) data.accessToken = encrypt(body.accessToken);
+    if (body.accessToken) {
+      data.accessToken = encrypt(body.accessToken);
+      const meta = new MetaApiService(body.accessToken, body.phoneNumberId || "");
+      data.metaAppId = await meta.debugToken();
+    }
     if (Object.keys(data).length === 0) return res.status(400).json({ error: "No fields to update" });
     const result = await prisma.whatsAppNumber.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -133,9 +146,11 @@ numbersRouter.put("/:id", async (req: AuthRequest, res, next) => {
 numbersRouter.post("/:id/rotate-token", async (req: AuthRequest, res, next) => {
   try {
     const { accessToken } = z.object({ accessToken: z.string() }).parse(req.body);
+    const meta = new MetaApiService(accessToken, "");
+    const metaAppId = await meta.debugToken();
     await prisma.whatsAppNumber.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
-      data: { accessToken: encrypt(accessToken) },
+      data: { accessToken: encrypt(accessToken), metaAppId },
     });
     res.json({ success: true });
   } catch (err) {

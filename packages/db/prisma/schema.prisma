@@ -165,6 +165,7 @@ model WhatsAppNumber {
   phoneNumberId       String       @unique
   wabaId              String
   accessToken         String       @db.Text
+  metaAppId           String?
   webhookVerifyToken  String
   status              NumberStatus @default(PENDING)
   tier                NumberTier   @default(TIER_1)

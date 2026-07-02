@@ -120,6 +120,21 @@ export class MetaApiService {
     return { id: response.data.id };
   }
 
+  // Resolves which Meta App issued this instance's access token, via self-inspection
+  // (input_token used as its own access_token — the standard way to debug a token
+  // when you don't hold that app's secret). Needed because different WhatsApp numbers
+  // may be connected through different Meta Apps/Business accounts.
+  async debugToken(): Promise<string | null> {
+    try {
+      const response = await axios.get(`${META_GRAPH_URL}/debug_token`, {
+        params: { input_token: this.accessToken, access_token: this.accessToken },
+      });
+      return response.data?.data?.app_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   // Resumable Upload API — required to get a header_handle for IMAGE/VIDEO/DOCUMENT
   // template examples. A public header_url is NOT accepted by message_templates.
   async uploadResumableMedia(appId: string, fileBuffer: Buffer, fileType: string, fileName: string): Promise<string> {

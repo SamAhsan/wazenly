@@ -99,10 +99,14 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
       fs.unlink(req.file.path, () => {});
       return res.status(500).json({ error: "WEBHOOK_BASE_URL is not configured on the server" });
     }
-    const appId = process.env.META_APP_ID;
+    // Numbers connected through different Meta Apps/Business accounts each need
+    // their own App ID for the Resumable Upload API — resolved and stored on the
+    // number when its access token was set (see routes/numbers.ts). META_APP_ID
+    // is only a fallback for numbers connected before that resolution existed.
+    const appId = number.metaAppId || process.env.META_APP_ID;
     if (!appId) {
       fs.unlink(req.file.path, () => {});
-      return res.status(500).json({ error: "META_APP_ID is not configured on the server" });
+      return res.status(500).json({ error: "Could not determine the Meta App ID for this number. Re-save its access token on the Numbers page to resolve it." });
     }
 
     const accessToken = decrypt(number.accessToken);
