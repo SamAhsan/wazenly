@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 function useSyncTemplates() {
   return useMutation({
@@ -38,7 +39,7 @@ function EmptyState() {
   );
 }
 
-export default function NumbersPage() {
+function NumbersPageContent() {
   const [showForm, setShowForm] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -283,5 +284,13 @@ export default function NumbersPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function NumbersPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <NumbersPageContent />
+    </RoleGuard>
   );
 }

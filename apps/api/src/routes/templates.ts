@@ -47,7 +47,7 @@ const templateSchema = z.object({
 });
 
 // GET /api/templates
-templatesRouter.get("/", async (req: AuthRequest, res, next) => {
+templatesRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { status, category, numberId, page = "1", limit = "20" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
@@ -207,7 +207,7 @@ templatesRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, 
 });
 
 // GET /api/templates/:id
-templatesRouter.get("/:id", async (req: AuthRequest, res, next) => {
+templatesRouter.get("/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const template = await prisma.template.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Save, ChevronLeft, Plus } from "lucide-react";
 import api from "@/lib/api";
 import { NodeConfigPanel, type NodeData } from "@/components/flows/NodeConfigPanel";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 const NODE_COLORS: Record<string, string> = {
   trigger: "#25D366",
@@ -59,7 +60,7 @@ const INITIAL_EDGES: Edge[] = [
   { id: "e1-2", source: "trigger-1", target: "message-1", animated: true },
 ];
 
-export default function FlowEditorPage() {
+function FlowEditorPageContent() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const isNew = id === "new";
@@ -204,5 +205,13 @@ export default function FlowEditorPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function FlowEditorPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <FlowEditorPageContent />
+    </RoleGuard>
   );
 }

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ChevronLeft, Plus, Trash2, Upload, FileText, Clock, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 interface TemplateForm {
   name: string;
@@ -42,7 +43,7 @@ interface Button {
   phone_number?: string;
 }
 
-export default function NewTemplatePage() {
+function NewTemplatePageContent() {
   const router = useRouter();
   const { selectedNumberId } = useSelectedNumber();
   const [buttons, setButtons] = useState<Button[]>([]);
@@ -489,5 +490,13 @@ export default function NewTemplatePage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewTemplatePage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <NewTemplatePageContent />
+    </RoleGuard>
   );
 }

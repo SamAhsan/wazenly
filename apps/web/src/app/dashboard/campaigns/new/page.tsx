@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ChevronRight, ChevronLeft, Check, Rocket, Users } from "lucide-react";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 const STEPS = ["Basic Info", "Audience", "Template", "Schedule", "Review"];
 
@@ -24,7 +25,7 @@ interface CampaignDraft {
   quietHoursEnd?: string;
 }
 
-export default function NewCampaignPage() {
+function NewCampaignPageContent() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const { selectedNumberId } = useSelectedNumber();
@@ -347,5 +348,13 @@ export default function NewCampaignPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function NewCampaignPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <NewCampaignPageContent />
+    </RoleGuard>
   );
 }

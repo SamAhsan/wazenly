@@ -8,8 +8,9 @@ import { ChevronLeft, Pause, Play, X, Download, Users, Send, CheckCircle2, Eye, 
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 import api from "@/lib/api";
 import { formatNumber, pct, formatDateTime, statusColor } from "@/lib/utils";
+import { RoleGuard } from "@/components/layout/role-guard";
 
-export default function CampaignDetailPage() {
+function CampaignDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
 
@@ -158,5 +159,13 @@ export default function CampaignDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CampaignDetailPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <CampaignDetailPageContent />
+    </RoleGuard>
   );
 }

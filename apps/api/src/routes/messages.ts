@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { MetaApiService } from "../services/meta.service";
 import { decrypt } from "@wazenly/shared";
 import { io } from "../index";
@@ -23,7 +23,7 @@ const sendMessageSchema = z.object({
 });
 
 // POST /api/messages/send
-messagesRouter.post("/send", async (req: AuthRequest, res, next) => {
+messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const body = sendMessageSchema.parse(req.body);
 

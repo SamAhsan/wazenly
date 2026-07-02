@@ -16,7 +16,7 @@ function hashToken(token: string): string {
 }
 
 // GET /api/settings/workspace
-settingsRouter.get("/workspace", async (req: AuthRequest, res, next) => {
+settingsRouter.get("/workspace", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const workspace = await prisma.workspace.findUnique({
       where: { id: req.workspaceId! },
@@ -48,8 +48,9 @@ settingsRouter.put("/workspace", requireRole("ADMIN"), async (req: AuthRequest, 
   }
 });
 
-// GET /api/settings/members
-settingsRouter.get("/members", async (req: AuthRequest, res, next) => {
+// GET /api/settings/members — MANAGER+ (not just ADMIN+) because the flow builder's
+// "assign to agent" action node needs the member list to populate its picker.
+settingsRouter.get("/members", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const members = await prisma.workspaceMember.findMany({
       where: { workspaceId: req.workspaceId! },
@@ -145,6 +146,33 @@ settingsRouter.delete("/invitations/:id", requireRole("ADMIN"), async (req: Auth
   }
 });
 
+// PUT /api/settings/members/:userId/role
+settingsRouter.put("/members/:userId/role", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const { role } = z.object({ role: z.enum(["ADMIN", "MANAGER", "AGENT", "VIEWER"]) }).parse(req.body);
+
+    const target = await prisma.workspaceMember.findFirst({
+      where: { workspaceId: req.workspaceId!, userId: req.params.userId },
+    });
+    if (!target) return res.status(404).json({ error: "Member not found" });
+    if (target.role === "OWNER") {
+      return res.status(403).json({ error: "The workspace owner's role cannot be changed" });
+    }
+    if (target.userId === req.userId) {
+      return res.status(403).json({ error: "You cannot change your own role" });
+    }
+
+    const updated = await prisma.workspaceMember.update({
+      where: { id: target.id },
+      data: { role },
+      include: { user: { select: { id: true, email: true, name: true, image: true } } },
+    });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/settings/members/:userId
 settingsRouter.delete("/members/:userId", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
@@ -170,7 +198,7 @@ settingsRouter.delete("/members/:userId", requireRole("ADMIN"), async (req: Auth
 // ─── API Keys ─────────────────────────────────────────────
 
 // GET /api/settings/api-keys
-settingsRouter.get("/api-keys", async (req: AuthRequest, res, next) => {
+settingsRouter.get("/api-keys", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const keys = await prisma.apiKey.findMany({
       where: { workspaceId: req.workspaceId!, revokedAt: null },
@@ -216,7 +244,7 @@ settingsRouter.delete("/api-keys/:id", requireRole("ADMIN"), async (req: AuthReq
 // ─── Webhooks ─────────────────────────────────────────────
 
 // GET /api/settings/webhooks
-settingsRouter.get("/webhooks", async (req: AuthRequest, res, next) => {
+settingsRouter.get("/webhooks", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { workspaceId: req.workspaceId! },
@@ -258,7 +286,7 @@ settingsRouter.delete("/webhooks/:id", requireRole("ADMIN"), async (req: AuthReq
 });
 
 // GET /api/settings/quick-replies
-settingsRouter.get("/quick-replies", async (req: AuthRequest, res, next) => {
+settingsRouter.get("/quick-replies", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const replies = await prisma.quickReply.findMany({ where: { workspaceId: req.workspaceId! } });
     res.json(replies);

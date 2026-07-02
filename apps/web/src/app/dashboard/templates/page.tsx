@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -8,6 +9,8 @@ import { Plus, FileText, Trash2, RefreshCw, Search, Send, X } from "lucide-react
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { RoleGuard } from "@/components/layout/role-guard";
+import { hasMinRole } from "@/lib/permissions";
 
 const CATEGORY_COLORS: Record<string, string> = {
   MARKETING: "bg-orange-50 text-orange-700",
@@ -21,7 +24,9 @@ type Template = {
   buttons?: { text: string }[];
 };
 
-export default function TemplatesPage() {
+function TemplatesPageContent() {
+  const { data: session } = useSession();
+  const canManage = hasMinRole(session?.role, "MANAGER");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [quickSendTemplate, setQuickSendTemplate] = useState<Template | null>(null);
@@ -111,21 +116,23 @@ export default function TemplatesPage() {
               : "Select a number from the top bar to filter templates"}
           </p>
         </div>
-        <div className="flex gap-2">
-          {selectedNumberId && (
-            <button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-              {syncMutation.isPending ? "Syncing..." : "Sync from Meta"}
-            </button>
-          )}
-          <Link href="/dashboard/templates/new" className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium">
-            <Plus className="w-4 h-4" /> New Template
-          </Link>
-        </div>
+        {canManage && (
+          <div className="flex gap-2">
+            {selectedNumberId && (
+              <button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                {syncMutation.isPending ? "Syncing..." : "Sync from Meta"}
+              </button>
+            )}
+            <Link href="/dashboard/templates/new" className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium">
+              <Plus className="w-4 h-4" /> New Template
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -145,9 +152,11 @@ export default function TemplatesPage() {
           </div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No templates found</h3>
           <p className="text-gray-500 text-sm mb-5">Create message templates for your campaigns. They need Meta approval before use.</p>
-          <Link href="/dashboard/templates/new" className="inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-lg text-sm font-medium">
-            <Plus className="w-4 h-4" /> Create Template
-          </Link>
+          {canManage && (
+            <Link href="/dashboard/templates/new" className="inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-lg text-sm font-medium">
+              <Plus className="w-4 h-4" /> Create Template
+            </Link>
+          )}
         </div>
       )}
 
@@ -194,12 +203,14 @@ export default function TemplatesPage() {
                     <Send className="w-3.5 h-3.5" /> Send
                   </button>
                 )}
-                <button
-                  onClick={() => { if (confirm("Delete template?")) deleteMutation.mutate(t.id); }}
-                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canManage && (
+                  <button
+                    onClick={() => { if (confirm("Delete template?")) deleteMutation.mutate(t.id); }}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -274,5 +285,13 @@ export default function TemplatesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function TemplatesPage() {
+  return (
+    <RoleGuard minRole="AGENT">
+      <TemplatesPageContent />
+    </RoleGuard>
   );
 }

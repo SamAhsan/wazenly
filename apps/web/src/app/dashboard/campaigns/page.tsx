@@ -8,10 +8,11 @@ import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, RotateCcw } fr
 import api from "@/lib/api";
 import { statusColor, formatDateTime, formatNumber, pct } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 const STATUSES = ["ALL", "DRAFT", "SCHEDULED", "RUNNING", "PAUSED", "COMPLETED", "FAILED"];
 
-export default function CampaignsPage() {
+function CampaignsPageContent() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
@@ -169,5 +170,13 @@ export default function CampaignsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CampaignsPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <CampaignsPageContent />
+    </RoleGuard>
   );
 }

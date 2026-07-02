@@ -19,7 +19,8 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/),
   name: z.string().min(2),
-  workspaceName: z.string().min(2),
+  workspaceName: z.string().min(2).optional(),
+  inviteToken: z.string().optional(),
 });
 
 const EMAIL_VERIFICATION_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TTL_HOURS) || 24;
@@ -90,13 +91,33 @@ authRouter.post("/register", authRateLimiter, async (req, res, next) => {
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
     if (existing) return res.status(409).json({ error: "Email already registered" });
 
+    // Registering via an invitation joins the inviter's existing workspace —
+    // it must never spin up a second, empty workspace for the new user.
+    let invitation = null;
+    if (body.inviteToken) {
+      invitation = await prisma.invitation.findUnique({
+        where: { tokenHash: hashToken(body.inviteToken) },
+      });
+      if (!invitation || invitation.expires < new Date() || invitation.acceptedAt) {
+        return res.status(400).json({ error: "This invitation is invalid or has expired" });
+      }
+      if (invitation.email.toLowerCase() !== body.email.toLowerCase()) {
+        return res.status(400).json({ error: "This invitation was sent to a different email address" });
+      }
+    } else if (!body.workspaceName) {
+      return res.status(400).json({ error: "Workspace name is required" });
+    }
+
     const hashedPassword = await bcrypt.hash(body.password, 12);
 
     const { user, workspace } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: { email: body.email, name: body.name, password: hashedPassword },
       });
-      const workspace = await createDefaultWorkspace(tx, user.id, body.workspaceName);
+      if (invitation) {
+        return { user, workspace: null };
+      }
+      const workspace = await createDefaultWorkspace(tx, user.id, body.workspaceName!);
       return { user, workspace };
     });
 

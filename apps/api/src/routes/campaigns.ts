@@ -31,7 +31,7 @@ const campaignSchema = z.object({
 });
 
 // GET /api/campaigns
-campaignsRouter.get("/", async (req: AuthRequest, res, next) => {
+campaignsRouter.get("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const { status, numberId, page = "1", limit = "20" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
@@ -115,7 +115,7 @@ campaignsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, 
 });
 
 // GET /api/campaigns/:id
-campaignsRouter.get("/:id", async (req: AuthRequest, res, next) => {
+campaignsRouter.get("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -282,7 +282,7 @@ campaignsRouter.delete("/:id", requireRole("MANAGER"), async (req: AuthRequest, 
 });
 
 // GET /api/campaigns/:id/contacts
-campaignsRouter.get("/:id/contacts", async (req: AuthRequest, res, next) => {
+campaignsRouter.get("/:id/contacts", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

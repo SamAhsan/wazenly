@@ -6,8 +6,9 @@ import { toast } from "sonner";
 import { Plus, Workflow, Play, Pause, Trash2, Edit } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
+import { RoleGuard } from "@/components/layout/role-guard";
 
-export default function FlowsPage() {
+function FlowsPageContent() {
   const queryClient = useQueryClient();
 
   const { data: flows = [], isLoading } = useQuery({
@@ -97,5 +98,13 @@ export default function FlowsPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function FlowsPage() {
+  return (
+    <RoleGuard minRole="MANAGER">
+      <FlowsPageContent />
+    </RoleGuard>
   );
 }

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Settings, Users, Key, Webhook, Copy, Plus, Trash2, Mail, Shield } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials } from "@/lib/utils";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 const TABS = [
   { id: "workspace", label: "Workspace", icon: Settings },
@@ -14,7 +16,8 @@ const TABS = [
   { id: "webhooks", label: "Webhooks", icon: Webhook },
 ];
 
-export default function SettingsPage() {
+function SettingsPageContent() {
+  const { data: session } = useSession();
   const [tab, setTab] = useState("workspace");
   const queryClient = useQueryClient();
 
@@ -48,6 +51,14 @@ export default function SettingsPage() {
     onError: (err: unknown) => {
       const e = err as { response?: { data?: { error?: string } } };
       toast.error(e.response?.data?.error || "Failed to remove member");
+    },
+  });
+  const changeRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) => api.put(`/settings/members/${userId}/role`, { role }),
+    onSuccess: () => { toast.success("Role updated"); queryClient.invalidateQueries({ queryKey: ["members"] }); },
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || "Failed to update role");
     },
   });
 
@@ -167,7 +178,19 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4"><span className="px-2.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">{m.role}</span></td>
+                    <td className="px-5 py-4">
+                      {m.role !== "OWNER" && m.user.email !== session?.user?.email ? (
+                        <select
+                          value={m.role}
+                          onChange={(e) => changeRoleMutation.mutate({ userId: m.user.id, role: e.target.value })}
+                          className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium border-0 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        >
+                          {["ADMIN", "MANAGER", "AGENT", "VIEWER"].map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      ) : (
+                        <span className="px-2.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">{m.role}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 text-xs text-gray-400">{m.joinedAt ? formatRelativeTime(m.joinedAt) : "Pending"}</td>
                     <td className="px-5 py-4 text-right">
                       {m.role !== "OWNER" && (
@@ -292,5 +315,13 @@ export default function SettingsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <RoleGuard minRole="ADMIN">
+      <SettingsPageContent />
+    </RoleGuard>
   );
 }

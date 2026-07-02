@@ -8,6 +8,7 @@ import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, 
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 type Contact = {
   id: string; name: string; email?: string; phone: string; tags: string[];
@@ -34,7 +35,7 @@ function getBodyVars(body: string): number[] {
 
 type CsvRow = Record<string, string>;
 
-export default function ContactsPage() {
+function ContactsPageContent() {
   const [tab, setTab] = useState<"contacts" | "lists">("contacts");
   const [search, setSearch] = useState("");
   const [optedOutFilter, setOptedOutFilter] = useState<boolean | undefined>();
@@ -810,5 +811,13 @@ export default function ContactsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ContactsPage() {
+  return (
+    <RoleGuard minRole="AGENT">
+      <ContactsPageContent />
+    </RoleGuard>
   );
 }

@@ -21,7 +21,7 @@ const contactSchema = z.object({
 });
 
 // GET /api/contacts
-contactsRouter.get("/", async (req: AuthRequest, res, next) => {
+contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { q, tags, listId, optedOut, page = "1", limit = "50" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
@@ -69,7 +69,7 @@ contactsRouter.post("/", requireRole("AGENT"), async (req: AuthRequest, res, nex
 });
 
 // GET /api/contacts/:id
-contactsRouter.get("/:id", async (req: AuthRequest, res, next) => {
+contactsRouter.get("/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const contact = await prisma.contact.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -141,7 +141,7 @@ contactsRouter.post("/import", upload.single("file"), requireRole("AGENT"), asyn
 // ─── Contact Lists ────────────────────────────────────────
 
 // GET /api/contacts/lists
-contactsRouter.get("/lists/all", async (req: AuthRequest, res, next) => {
+contactsRouter.get("/lists/all", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const lists = await prisma.contactList.findMany({
       where: { workspaceId: req.workspaceId! },

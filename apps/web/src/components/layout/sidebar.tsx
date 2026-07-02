@@ -8,21 +8,20 @@ import {
   Workflow, Phone, BarChart3, Settings, MessageCircle, ChevronRight, X, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { hasMinRole, type Role } from "@/lib/permissions";
 
-const navItems = [
+const navItems: { href: string; label: string; icon: typeof LayoutDashboard; minRole?: Role }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/dashboard/contacts", label: "Contacts", icon: Users },
-  { href: "/dashboard/templates", label: "Templates", icon: FileText },
-  { href: "/dashboard/flows", label: "Flows", icon: Workflow },
-  { href: "/dashboard/numbers", label: "Numbers", icon: Phone, minRole: "ADMIN" },
+  { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, minRole: "MANAGER" },
+  { href: "/dashboard/contacts", label: "Contacts", icon: Users, minRole: "AGENT" },
+  { href: "/dashboard/templates", label: "Templates", icon: FileText, minRole: "AGENT" },
+  { href: "/dashboard/flows", label: "Flows", icon: Workflow, minRole: "MANAGER" },
+  { href: "/dashboard/numbers", label: "Numbers", icon: Phone, minRole: "MANAGER" },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings, minRole: "ADMIN" },
   { href: "/dashboard/admin/diagnostics", label: "Diagnostics", icon: Activity, minRole: "OWNER" },
 ];
-
-const ROLES_HIERARCHY: Record<string, number> = { OWNER: 5, ADMIN: 4, MANAGER: 3, AGENT: 2, VIEWER: 1 };
 
 interface SidebarProps {
   mobileOpen?: boolean;
@@ -32,8 +31,7 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const roleLevel = ROLES_HIERARCHY[session?.role || ""] || 0;
-  const visibleNavItems = navItems.filter((item) => !item.minRole || roleLevel >= ROLES_HIERARCHY[item.minRole]);
+  const visibleNavItems = navItems.filter((item) => !item.minRole || hasMinRole(session?.role, item.minRole));
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">

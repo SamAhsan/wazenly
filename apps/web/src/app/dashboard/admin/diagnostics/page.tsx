@@ -1,12 +1,10 @@
 "use client";
 
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle, XCircle, AlertTriangle, Mail, Server, UserX, Shield } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
+import { RoleGuard } from "@/components/layout/role-guard";
 
 interface Diagnostics {
   smtp: { configured: boolean; verified: boolean; error?: string };
@@ -27,24 +25,13 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-export default function DiagnosticsPage() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (status === "authenticated" && session?.role !== "OWNER") {
-      router.replace("/dashboard");
-    }
-  }, [status, session, router]);
-
+function DiagnosticsPageContent() {
   const { data, isLoading } = useQuery<Diagnostics>({
     queryKey: ["admin-diagnostics"],
     queryFn: () => api.get("/admin/diagnostics").then((r) => r.data),
-    enabled: session?.role === "OWNER",
     refetchInterval: 30000,
   });
 
-  if (session?.role !== "OWNER") return null;
   if (isLoading || !data) return <div className="p-6 text-gray-400 text-sm">Loading diagnostics…</div>;
 
   return (
@@ -160,5 +147,13 @@ export default function DiagnosticsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DiagnosticsPage() {
+  return (
+    <RoleGuard minRole="OWNER">
+      <DiagnosticsPageContent />
+    </RoleGuard>
   );
 }

@@ -32,7 +32,7 @@ const flowSchema = z.object({
 });
 
 // GET /api/flows
-flowsRouter.get("/", async (req: AuthRequest, res, next) => {
+flowsRouter.get("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const flows = await prisma.flow.findMany({
       where: { workspaceId: req.workspaceId! },
@@ -72,7 +72,7 @@ flowsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, next
 });
 
 // GET /api/flows/:id
-flowsRouter.get("/:id", async (req: AuthRequest, res, next) => {
+flowsRouter.get("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const flow = await prisma.flow.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

@@ -97,7 +97,7 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
 });
 
 // GET /api/numbers/:id
-numbersRouter.get("/:id", async (req: AuthRequest, res, next) => {
+numbersRouter.get("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const number = await prisma.whatsAppNumber.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -171,7 +171,7 @@ numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res,
 });
 
 // GET /api/numbers/:id/stats
-numbersRouter.get("/:id/stats", async (req: AuthRequest, res, next) => {
+numbersRouter.get("/:id/stats", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);

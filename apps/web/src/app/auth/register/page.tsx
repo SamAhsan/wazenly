@@ -14,7 +14,7 @@ const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email"),
   password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, "Must have uppercase, lowercase, and a number"),
-  workspaceName: z.string().min(2, "Workspace name required"),
+  workspaceName: z.string().min(2, "Workspace name required").optional(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -28,7 +28,6 @@ function RegisterForm() {
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { workspaceName: inviteToken ? "My Workspace" : undefined },
   });
 
   useEffect(() => {
@@ -41,7 +40,7 @@ function RegisterForm() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      await api.post("/auth/register", data);
+      await api.post("/auth/register", { ...data, inviteToken: inviteToken || undefined });
       toast.success("Account created! Check your email to verify your account.");
       router.push(inviteToken ? `/auth/login?invite=${inviteToken}` : "/auth/login");
     } catch (error: unknown) {
@@ -78,12 +77,13 @@ function RegisterForm() {
             {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Company / Workspace Name</label>
-            <input {...register("workspaceName")} type="text" placeholder="Acme Corp" className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm" />
-            {errors.workspaceName && <p className="text-red-500 text-xs mt-1">{errors.workspaceName.message}</p>}
-            {inviteToken && <p className="text-xs text-gray-400 mt-1">You&apos;ll also get your own workspace — you can switch to the one you were invited to after signing in.</p>}
-          </div>
+          {!inviteToken && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Company / Workspace Name</label>
+              <input {...register("workspaceName")} type="text" placeholder="Acme Corp" className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm" />
+              {errors.workspaceName && <p className="text-red-500 text-xs mt-1">{errors.workspaceName.message}</p>}
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
