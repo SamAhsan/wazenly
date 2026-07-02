@@ -31,11 +31,31 @@ export default function SettingsPage() {
   const [inviteRole, setInviteRole] = useState("AGENT");
   const inviteMutation = useMutation({
     mutationFn: () => api.post("/settings/members/invite", { email: inviteEmail, role: inviteRole }),
-    onSuccess: () => { toast.success("Invite sent"); setInviteEmail(""); queryClient.invalidateQueries({ queryKey: ["members"] }); },
+    onSuccess: () => {
+      toast.success("Invite sent");
+      setInviteEmail("");
+      queryClient.invalidateQueries({ queryKey: ["members"] });
+      queryClient.invalidateQueries({ queryKey: ["invitations"] });
+    },
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || "Failed to send invite");
+    },
   });
   const removeMemberMutation = useMutation({
     mutationFn: (userId: string) => api.delete(`/settings/members/${userId}`),
     onSuccess: () => { toast.success("Member removed"); queryClient.invalidateQueries({ queryKey: ["members"] }); },
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || "Failed to remove member");
+    },
+  });
+
+  // Pending invitations
+  const { data: invitations = [] } = useQuery({ queryKey: ["invitations"], queryFn: () => api.get("/settings/invitations").then((r) => r.data) });
+  const revokeInviteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/settings/invitations/${id}`),
+    onSuccess: () => { toast.success("Invitation revoked"); queryClient.invalidateQueries({ queryKey: ["invitations"] }); },
   });
 
   // API Keys
@@ -161,6 +181,29 @@ export default function SettingsPage() {
               </tbody>
             </table>
           </div>
+
+          {invitations.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100"><h3 className="text-sm font-semibold text-gray-900">Pending Invitations</h3></div>
+              <table className="w-full">
+                <thead><tr className="border-b border-gray-100 text-xs text-gray-500"><th className="text-left px-5 py-3">Email</th><th className="text-left px-5 py-3">Role</th><th className="text-left px-5 py-3">Expires</th><th className="text-right px-5 py-3">Actions</th></tr></thead>
+                <tbody>
+                  {invitations.map((inv: { id: string; email: string; role: string; expires: string }) => (
+                    <tr key={inv.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-5 py-4 text-sm text-gray-900">{inv.email}</td>
+                      <td className="px-5 py-4"><span className="px-2.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">{inv.role}</span></td>
+                      <td className="px-5 py-4 text-xs text-gray-400">{formatRelativeTime(inv.expires)}</td>
+                      <td className="px-5 py-4 text-right">
+                        <button onClick={() => revokeInviteMutation.mutate(inv.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

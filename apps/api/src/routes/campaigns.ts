@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { campaignSenderQueue } from "@wazenly/queue";
 import { CAMPAIGN_BATCH_SIZE } from "@wazenly/shared";
 
@@ -58,7 +58,7 @@ campaignsRouter.get("/", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/campaigns
-campaignsRouter.post("/", async (req: AuthRequest, res, next) => {
+campaignsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const body = campaignSchema.parse(req.body);
 
@@ -133,7 +133,7 @@ campaignsRouter.get("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // PUT /api/campaigns/:id
-campaignsRouter.put("/:id", async (req: AuthRequest, res, next) => {
+campaignsRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -161,7 +161,7 @@ campaignsRouter.put("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/campaigns/:id/launch
-campaignsRouter.post("/:id/launch", async (req: AuthRequest, res, next) => {
+campaignsRouter.post("/:id/launch", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -234,7 +234,7 @@ campaignsRouter.post("/:id/launch", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/campaigns/:id/pause
-campaignsRouter.post("/:id/pause", async (req: AuthRequest, res, next) => {
+campaignsRouter.post("/:id/pause", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.campaign.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId!, status: "RUNNING" },
@@ -247,7 +247,7 @@ campaignsRouter.post("/:id/pause", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/campaigns/:id/resume  (also re-triggers stuck RUNNING campaigns)
-campaignsRouter.post("/:id/resume", async (req: AuthRequest, res, next) => {
+campaignsRouter.post("/:id/resume", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const campaign = await prisma.campaign.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId!, status: { in: ["PAUSED", "RUNNING"] } },
@@ -270,7 +270,7 @@ campaignsRouter.post("/:id/resume", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/campaigns/:id
-campaignsRouter.delete("/:id", async (req: AuthRequest, res, next) => {
+campaignsRouter.delete("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.campaign.deleteMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

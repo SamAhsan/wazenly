@@ -3,7 +3,7 @@ import multer from "multer";
 import { parse } from "csv-parse/sync";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { normalizePhone, isValidPhone } from "@wazenly/shared";
 import { contactImporterQueue } from "@wazenly/queue";
 
@@ -50,7 +50,7 @@ contactsRouter.get("/", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/contacts
-contactsRouter.post("/", async (req: AuthRequest, res, next) => {
+contactsRouter.post("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const body = contactSchema.parse(req.body);
     const phone = normalizePhone(body.phone);
@@ -87,7 +87,7 @@ contactsRouter.get("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // PUT /api/contacts/:id
-contactsRouter.put("/:id", async (req: AuthRequest, res, next) => {
+contactsRouter.put("/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const body = contactSchema.partial().parse(req.body);
     const contact = await prisma.contact.updateMany({
@@ -102,7 +102,7 @@ contactsRouter.put("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/contacts/:id
-contactsRouter.delete("/:id", async (req: AuthRequest, res, next) => {
+contactsRouter.delete("/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.contact.deleteMany({ where: { id: req.params.id, workspaceId: req.workspaceId! } });
     res.json({ success: true });
@@ -112,7 +112,7 @@ contactsRouter.delete("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/contacts/import
-contactsRouter.post("/import", upload.single("file"), async (req: AuthRequest, res, next) => {
+contactsRouter.post("/import", upload.single("file"), requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "CSV file required" });
     const { listId, deduplicate = "true" } = req.body as { listId?: string; deduplicate?: string };
@@ -155,7 +155,7 @@ contactsRouter.get("/lists/all", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/contacts/lists
-contactsRouter.post("/lists", async (req: AuthRequest, res, next) => {
+contactsRouter.post("/lists", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { name, description } = z.object({ name: z.string().min(2), description: z.string().optional() }).parse(req.body);
     const list = await prisma.contactList.create({
@@ -168,7 +168,7 @@ contactsRouter.post("/lists", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/contacts/lists/:id/members
-contactsRouter.post("/lists/:listId/members", async (req: AuthRequest, res, next) => {
+contactsRouter.post("/lists/:listId/members", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { contactIds } = z.object({ contactIds: z.array(z.string()) }).parse(req.body);
     await prisma.contactListMember.createMany({

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "@wazenly/db";
+import { ROLES_HIERARCHY } from "@wazenly/shared";
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -62,4 +63,14 @@ export async function requireWorkspace(req: AuthRequest, res: Response, next: Ne
 
   req.workspaceId = workspaceId;
   next();
+}
+
+export function requireRole(minRole: keyof typeof ROLES_HIERARCHY) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    const role = req.role as keyof typeof ROLES_HIERARCHY | undefined;
+    if (!role || ROLES_HIERARCHY[role] < ROLES_HIERARCHY[minRole]) {
+      return res.status(403).json({ error: "Insufficient permissions for this action" });
+    }
+    next();
+  };
 }

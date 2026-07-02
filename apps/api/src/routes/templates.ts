@@ -4,7 +4,7 @@ import fs from "fs";
 import multer from "multer";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { MetaApiService } from "../services/meta.service";
 import { buildTemplateComponents } from "../services/template-payload";
 import { decrypt } from "@wazenly/shared";
@@ -77,7 +77,7 @@ templatesRouter.get("/", async (req: AuthRequest, res, next) => {
 // then push the file to Meta via the Resumable Upload API to get a header_handle.
 // Meta's message_templates endpoint only accepts example.header_handle — a
 // header_url is silently ignored, which is why templates were failing review.
-templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthRequest, res, next) => {
+templatesRouter.post("/upload-media", upload.single("file"), requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: "File required" });
     const { numberId } = req.body as { numberId: string };
@@ -134,7 +134,7 @@ templatesRouter.post("/upload-media", upload.single("file"), async (req: AuthReq
 });
 
 // POST /api/templates
-templatesRouter.post("/", async (req: AuthRequest, res, next) => {
+templatesRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const body = templateSchema.parse(req.body);
 
@@ -220,7 +220,7 @@ templatesRouter.get("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/templates/:id
-templatesRouter.delete("/:id", async (req: AuthRequest, res, next) => {
+templatesRouter.delete("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.template.deleteMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -232,7 +232,7 @@ templatesRouter.delete("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/templates/sync
-templatesRouter.post("/sync", async (req: AuthRequest, res, next) => {
+templatesRouter.post("/sync", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const { numberId } = req.body as { numberId: string };
     const number = await prisma.whatsAppNumber.findFirst({

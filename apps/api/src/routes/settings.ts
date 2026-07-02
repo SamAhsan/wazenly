@@ -2,10 +2,18 @@ import { Router } from "express";
 import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
+import { sendMail } from "../services/mailer.service";
+import { invitationEmail } from "../services/email-templates";
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth, requireWorkspace);
+
+const INVITATION_TTL_HOURS = Number(process.env.INVITATION_TTL_HOURS) || 168;
+
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 // GET /api/settings/workspace
 settingsRouter.get("/workspace", async (req: AuthRequest, res, next) => {
@@ -22,7 +30,7 @@ settingsRouter.get("/workspace", async (req: AuthRequest, res, next) => {
 });
 
 // PUT /api/settings/workspace
-settingsRouter.put("/workspace", async (req: AuthRequest, res, next) => {
+settingsRouter.put("/workspace", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({
       name: z.string().min(2).optional(),
@@ -54,38 +62,102 @@ settingsRouter.get("/members", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/settings/members/invite
-settingsRouter.post("/members/invite", async (req: AuthRequest, res, next) => {
+settingsRouter.post("/members/invite", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const { email, role } = z.object({
       email: z.string().email(),
       role: z.enum(["ADMIN", "MANAGER", "AGENT", "VIEWER"]),
     }).parse(req.body);
 
-    let user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      user = await prisma.user.create({ data: { email, name: email.split("@")[0] } });
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      const existingMember = await prisma.workspaceMember.findFirst({
+        where: { workspaceId: req.workspaceId!, userId: existingUser.id },
+      });
+      if (existingMember) return res.status(409).json({ error: "User already a member" });
     }
 
-    const existing = await prisma.workspaceMember.findFirst({
-      where: { workspaceId: req.workspaceId!, userId: user.id },
+    const existingInvite = await prisma.invitation.findUnique({
+      where: { workspaceId_email: { workspaceId: req.workspaceId!, email } },
     });
-    if (existing) return res.status(409).json({ error: "User already a member" });
+    if (existingInvite && existingInvite.expires > new Date()) {
+      return res.status(409).json({ error: "An invitation is already pending for this email" });
+    }
+    if (existingInvite) {
+      await prisma.invitation.delete({ where: { id: existingInvite.id } });
+    }
 
-    const inviteToken = crypto.randomBytes(32).toString("hex");
-    const member = await prisma.workspaceMember.create({
-      data: { workspaceId: req.workspaceId!, userId: user.id, role, inviteToken },
-      include: { user: { select: { id: true, email: true, name: true } } },
+    const workspace = await prisma.workspace.findUnique({ where: { id: req.workspaceId! } });
+    const inviter = await prisma.user.findUnique({ where: { id: req.userId! } });
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const invitation = await prisma.invitation.create({
+      data: {
+        workspaceId: req.workspaceId!,
+        email,
+        role,
+        tokenHash: hashToken(rawToken),
+        invitedByUserId: req.userId!,
+        expires: new Date(Date.now() + INVITATION_TTL_HOURS * 3600000),
+      },
     });
 
-    res.status(201).json({ member, inviteToken });
+    const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL}/invite/${rawToken}`;
+    try {
+      await sendMail({
+        to: email,
+        subject: `You're invited to join ${workspace?.name} on WAZENLY`,
+        html: invitationEmail(workspace?.name || "a workspace", role, inviter?.name || null, acceptUrl, Math.round(INVITATION_TTL_HOURS / 24)),
+      });
+    } catch (mailErr) {
+      console.error("[InviteMember] Failed to send invitation email:", mailErr);
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[Dev] Invitation link for ${email}: ${acceptUrl}`);
+    }
+
+    res.status(201).json({ invitation: { id: invitation.id, email: invitation.email, role: invitation.role, expires: invitation.expires } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/settings/invitations
+settingsRouter.get("/invitations", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const invitations = await prisma.invitation.findMany({
+      where: { workspaceId: req.workspaceId!, acceptedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(invitations);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/settings/invitations/:id
+settingsRouter.delete("/invitations/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    await prisma.invitation.deleteMany({ where: { id: req.params.id, workspaceId: req.workspaceId! } });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
 });
 
 // DELETE /api/settings/members/:userId
-settingsRouter.delete("/members/:userId", async (req: AuthRequest, res, next) => {
+settingsRouter.delete("/members/:userId", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
+    const target = await prisma.workspaceMember.findFirst({
+      where: { workspaceId: req.workspaceId!, userId: req.params.userId },
+    });
+    if (target?.role === "OWNER") {
+      const ownerCount = await prisma.workspaceMember.count({
+        where: { workspaceId: req.workspaceId!, role: "OWNER" },
+      });
+      if (ownerCount <= 1) return res.status(400).json({ error: "Cannot remove the workspace's only owner" });
+    }
+
     await prisma.workspaceMember.deleteMany({
       where: { workspaceId: req.workspaceId!, userId: req.params.userId },
     });
@@ -111,7 +183,7 @@ settingsRouter.get("/api-keys", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/settings/api-keys
-settingsRouter.post("/api-keys", async (req: AuthRequest, res, next) => {
+settingsRouter.post("/api-keys", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const { name } = z.object({ name: z.string().min(2) }).parse(req.body);
     const rawKey = `waz_${crypto.randomBytes(32).toString("hex")}`;
@@ -129,7 +201,7 @@ settingsRouter.post("/api-keys", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/settings/api-keys/:id
-settingsRouter.delete("/api-keys/:id", async (req: AuthRequest, res, next) => {
+settingsRouter.delete("/api-keys/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.apiKey.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -156,7 +228,7 @@ settingsRouter.get("/webhooks", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/settings/webhooks
-settingsRouter.post("/webhooks", async (req: AuthRequest, res, next) => {
+settingsRouter.post("/webhooks", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({
       url: z.string().url(),
@@ -174,7 +246,7 @@ settingsRouter.post("/webhooks", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/settings/webhooks/:id
-settingsRouter.delete("/webhooks/:id", async (req: AuthRequest, res, next) => {
+settingsRouter.delete("/webhooks/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.webhookEndpoint.deleteMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -196,7 +268,7 @@ settingsRouter.get("/quick-replies", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/settings/quick-replies
-settingsRouter.post("/quick-replies", async (req: AuthRequest, res, next) => {
+settingsRouter.post("/quick-replies", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { title, body } = z.object({ title: z.string(), body: z.string() }).parse(req.body);
     const reply = await prisma.quickReply.create({ data: { workspaceId: req.workspaceId!, title, body } });

@@ -4,6 +4,9 @@ import { prisma } from "@wazenly/db";
 import { QUEUE_NAMES, OPT_OUT_KEYWORDS } from "@wazenly/shared";
 import type { MetaWebhookPayload } from "@wazenly/shared";
 import { redisConnection } from "../redis";
+import { findMatchingFlowStart, executeFromNode, resumeWaitingInput } from "../services/flow-engine.service";
+import { notifyUsers, getMembersWithMinRole, wasRecentlyNotified, notifyOnFinalJobFailure } from "../services/notification.service";
+import type { WhatsAppNumber, Workspace, Contact } from "@wazenly/db";
 
 interface WebhookJobData {
   payload: MetaWebhookPayload;
@@ -23,6 +26,41 @@ async function upsertDailyAnalytics(
     create: { workspaceId, numberId, date: today, [field]: amount } as any,
     update: { [field]: { increment: amount } } as any,
   });
+}
+
+async function runFlowEngineForMessage(
+  number: WhatsAppNumber & { workspace: Workspace },
+  contact: Contact,
+  messageText: string | undefined,
+  isNewContact: boolean
+): Promise<void> {
+  const session = await prisma.flowSession.findUnique({
+    where: { contactId_numberId: { contactId: contact.id, numberId: number.id } },
+  });
+
+  if (session?.state === "WAITING_INPUT") {
+    const flow = await prisma.flow.findUnique({ where: { id: session.flowId } });
+    if (!flow) return;
+    await resumeWaitingInput(
+      { flow, contact, number, workspace: number.workspace, variables: (session.variables as Record<string, unknown>) || {} },
+      session.nodeId,
+      messageText || ""
+    );
+    return;
+  }
+
+  if (session?.state === "WAITING_DELAY") {
+    // A delayed job is already scheduled to resume this session — leave it alone.
+    return;
+  }
+
+  const match = await findMatchingFlowStart(number.workspaceId, number.id, messageText, isNewContact, !isNewContact);
+  if (!match) return;
+
+  await executeFromNode(
+    { flow: match.flow, contact, number, workspace: number.workspace, variables: {} },
+    match.startNodeId
+  );
 }
 
 async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
@@ -52,6 +90,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
           let contact = await prisma.contact.findFirst({
             where: { workspaceId: number.workspaceId, phone: `+${msg.from}` },
           });
+          const isNewContact = !contact;
 
           if (!contact) {
             contact = await prisma.contact.create({
@@ -124,6 +163,26 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             message: msg,
             numberId: number.id,
           });
+
+          // Flow Builder execution
+          try {
+            await runFlowEngineForMessage(number, contact, msg.text?.body, isNewContact);
+          } catch (err) {
+            console.error(`[WebhookWorker] Flow engine error for contact ${contact.id}:`, (err as Error).message);
+          }
+
+          // Notify: new incoming message — the assigned agent, or (for a brand-new contact only) the whole team
+          try {
+            const preview = msg.text?.body?.slice(0, 80) || `[${msg.type}]`;
+            const recipients = conversation.assignedUserId
+              ? [conversation.assignedUserId]
+              : isNewContact
+                ? await getMembersWithMinRole(number.workspaceId, "AGENT")
+                : [];
+            await notifyUsers(number.workspaceId, recipients, "NEW_MESSAGE", `New message from ${contact.name}`, preview, "/dashboard/inbox");
+          } catch (err) {
+            console.error(`[WebhookWorker] Notification error for contact ${contact.id}:`, (err as Error).message);
+          }
         }
       }
 
@@ -242,6 +301,23 @@ async function dispatchOutboundWebhooks(
         where: { id: webhookEvent.id },
         data: { status: "failed", attempts: { increment: 1 } },
       });
+
+      try {
+        const recipients = await getMembersWithMinRole(workspaceId, "ADMIN");
+        const alreadyNotified = await wasRecentlyNotified(recipients, "WEBHOOK_FAILED", 3600000, endpoint.id);
+        if (!alreadyNotified) {
+          await notifyUsers(
+            workspaceId,
+            recipients,
+            "WEBHOOK_FAILED",
+            "Webhook delivery failed",
+            `Delivery to ${endpoint.url} failed.`,
+            `/dashboard/settings?webhook=${endpoint.id}`
+          );
+        }
+      } catch (err) {
+        console.error(`[WebhookWorker] Failed to send webhook-failure notification:`, (err as Error).message);
+      }
     }
   }
 }
@@ -255,6 +331,14 @@ export function createWebhookWorker() {
 
   worker.on("failed", (job, err) => {
     console.error(`[WebhookWorker] Job ${job?.id} failed:`, err.message);
+    if (job?.data.phoneNumberId) {
+      prisma.whatsAppNumber
+        .findUnique({ where: { phoneNumberId: job.data.phoneNumberId }, select: { workspaceId: true } })
+        .then((number) => {
+          if (number) return notifyOnFinalJobFailure(job, number.workspaceId, "Webhook processing", err.message);
+        })
+        .catch(() => {});
+    }
   });
 
   return worker;

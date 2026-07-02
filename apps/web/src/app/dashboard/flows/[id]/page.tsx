@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ReactFlow, {
   addEdge, Background, Controls, MiniMap, useEdgesState, useNodesState,
-  type Connection, type Edge, type Node, Panel,
+  Handle, Position, type Connection, type Edge, type Node, Panel,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Save, Play, ChevronLeft, Plus } from "lucide-react";
+import { Save, ChevronLeft, Plus } from "lucide-react";
 import api from "@/lib/api";
+import { NodeConfigPanel, type NodeData } from "@/components/flows/NodeConfigPanel";
 
 const NODE_COLORS: Record<string, string> = {
   trigger: "#25D366",
@@ -22,24 +23,36 @@ const NODE_COLORS: Record<string, string> = {
   jump: "#EF4444",
 };
 
-function CustomNode({ data }: { data: { label: string; type: string; config?: object } }) {
+function CustomNode({ data }: { data: NodeData }) {
   const color = NODE_COLORS[data.type] || "#6B7280";
   return (
-    <div className="bg-white border-2 rounded-xl px-4 py-3 shadow-sm min-w-[150px]" style={{ borderColor: color }}>
+    <div className="relative bg-white border-2 rounded-xl px-4 py-3 shadow-sm min-w-[150px]" style={{ borderColor: color }}>
+      {data.type !== "trigger" && <Handle type="target" position={Position.Top} className="!bg-gray-400" />}
       <div className="flex items-center gap-2">
         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{data.type}</span>
       </div>
       <p className="text-sm font-medium text-gray-900 mt-1">{data.label}</p>
+
+      {data.type === "condition" ? (
+        <>
+          <Handle type="source" position={Position.Bottom} id="yes" style={{ left: "30%" }} className="!bg-green-500" />
+          <span className="pointer-events-none absolute -bottom-4 text-[9px] font-semibold text-green-600" style={{ left: "30%", transform: "translateX(-50%)" }}>Yes</span>
+          <Handle type="source" position={Position.Bottom} id="no" style={{ left: "70%" }} className="!bg-red-500" />
+          <span className="pointer-events-none absolute -bottom-4 text-[9px] font-semibold text-red-600" style={{ left: "70%", transform: "translateX(-50%)" }}>No</span>
+        </>
+      ) : data.type !== "jump" ? (
+        <Handle type="source" position={Position.Bottom} className="!bg-gray-400" />
+      ) : null}
     </div>
   );
 }
 
 const nodeTypes = { custom: CustomNode };
 
-const INITIAL_NODES: Node[] = [
-  { id: "trigger-1", type: "custom", position: { x: 100, y: 100 }, data: { label: "Start: Keyword match", type: "trigger" } },
-  { id: "message-1", type: "custom", position: { x: 100, y: 250 }, data: { label: "Send welcome message", type: "message" } },
+const INITIAL_NODES: Node<NodeData>[] = [
+  { id: "trigger-1", type: "custom", position: { x: 100, y: 100 }, data: { label: "Start: Keyword match", type: "trigger", config: { matchType: "keyword", keywords: [] } } },
+  { id: "message-1", type: "custom", position: { x: 100, y: 250 }, data: { label: "Send welcome message", type: "message", config: { mode: "text", text: "Welcome!" } } },
 ];
 
 const INITIAL_EDGES: Edge[] = [
@@ -51,9 +64,10 @@ export default function FlowEditorPage() {
   const router = useRouter();
   const isNew = id === "new";
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(INITIAL_NODES);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(INITIAL_EDGES);
+  const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>(isNew ? INITIAL_NODES : []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(isNew ? INITIAL_EDGES : []);
   const [flowName, setFlowName] = useState("Untitled Flow");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const { data: flow } = useQuery({
     queryKey: ["flow", id],
@@ -71,20 +85,23 @@ export default function FlowEditorPage() {
       }
       if (flow.edges?.length) {
         setEdges(flow.edges.map((e: { id: string; sourceNodeId: string; targetNodeId: string; label?: string }) => ({
-          id: e.id, source: e.sourceNodeId, target: e.targetNodeId, label: e.label, animated: true,
+          id: e.id, source: e.sourceNodeId, target: e.targetNodeId, label: e.label, sourceHandle: e.label === "Yes" ? "yes" : e.label === "No" ? "no" : undefined, animated: true,
         })));
       }
     }
   }, [flow, setNodes, setEdges]);
 
-  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge({ ...params, animated: true }, eds)), [setEdges]);
+  const onConnect = useCallback((params: Connection) => {
+    const label = params.sourceHandle === "yes" ? "Yes" : params.sourceHandle === "no" ? "No" : undefined;
+    setEdges((eds) => addEdge({ ...params, label, animated: true }, eds));
+  }, [setEdges]);
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload = {
         name: flowName,
-        nodes: nodes.map((n) => ({ id: n.id, type: (n.data as { type: string }).type, label: (n.data as { label: string }).label, positionX: n.position.x, positionY: n.position.y, data: n.data })),
-        edges: edges.map((e) => ({ id: e.id, sourceNodeId: e.source, targetNodeId: e.target, label: e.label as string })),
+        nodes: nodes.map((n) => ({ id: n.id, type: n.data.type, label: n.data.label, positionX: n.position.x, positionY: n.position.y, data: n.data })),
+        edges: edges.map((e) => ({ id: e.id, sourceNodeId: e.source, targetNodeId: e.target, label: e.label as string | undefined })),
       };
       return isNew ? api.post("/flows", payload) : api.put(`/flows/${id}`, payload);
     },
@@ -96,13 +113,21 @@ export default function FlowEditorPage() {
   });
 
   function addNode(type: string) {
-    const newNode: Node = {
+    const newNode: Node<NodeData> = {
       id: `${type}-${Date.now()}`,
       type: "custom",
       position: { x: Math.random() * 400 + 100, y: Math.random() * 300 + 100 },
-      data: { label: `New ${type} node`, type },
+      data: { label: `New ${type} node`, type, config: {} },
     };
     setNodes((nds) => [...nds, newNode]);
+  }
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) || null;
+
+  function handleSaveNodeConfig(label: string, config: object) {
+    setNodes((nds) => nds.map((n) => (n.id === selectedNodeId ? { ...n, data: { ...n.data, label, config } } : n)));
+    setSelectedNodeId(null);
+    toast.success("Node updated — remember to Save the flow");
   }
 
   return (
@@ -135,6 +160,7 @@ export default function FlowEditorPage() {
               </button>
             ))}
           </div>
+          <p className="text-xs text-gray-400 mt-4">Click a node on the canvas to configure it.</p>
         </div>
 
         {/* Flow canvas */}
@@ -145,13 +171,15 @@ export default function FlowEditorPage() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+            onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
             fitView
             className="bg-gray-50"
           >
             <Background gap={20} size={1} color="#e5e7eb" />
             <Controls />
-            <MiniMap nodeColor={(n) => NODE_COLORS[(n.data as { type: string }).type] || "#6B7280"} className="!bg-white !border-gray-200 !rounded-lg" />
+            <MiniMap nodeColor={(n) => NODE_COLORS[(n.data as NodeData).type] || "#6B7280"} className="!bg-white !border-gray-200 !rounded-lg" />
             <Panel position="top-right" className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
               <div className="flex items-center gap-3 text-xs">
                 {Object.entries(NODE_COLORS).map(([type, color]) => (
@@ -164,6 +192,16 @@ export default function FlowEditorPage() {
             </Panel>
           </ReactFlow>
         </div>
+
+        {selectedNode && (
+          <NodeConfigPanel
+            node={selectedNode}
+            allNodes={nodes}
+            currentFlowId={isNew ? undefined : id}
+            onClose={() => setSelectedNodeId(null)}
+            onSave={handleSaveNodeConfig}
+          />
+        )}
       </div>
     </div>
   );

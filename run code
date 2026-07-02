@@ -7,3 +7,53 @@ npm run dev --workspace=packages/queue
 
 docker-compose up -d   # if not already running
 npm run dev            # starts API + Web + Queue in one terminal via Turbo
+Email: admin@wazenly.com
+Password: Admin1234!
+
+Bugs Fixed
+Bug 1 — Silent contact skip for campaigns > 50 contacts (campaign.worker.ts)
+The worker was doing findMany({ where: { status: "QUEUED" }, skip: batchOffset, take: 50 }). After batch 1 processes 50 contacts (they become SENT), the next job runs with skip: 50 — but there are only the remaining QUEUED contacts left to skip, so it skips them all and marks the campaign complete. Everyone after contact #50 was silently dropped.
+
+Fix: removed skip entirely. Each batch always fetches the first N QUEUED contacts by createdAt order.
+
+Bug 2 — Delivered/Read/Failed always shows 0% (webhook.worker.ts)
+Webhook callbacks from Meta updated individual CampaignContact.status rows but never rolled up into Campaign.deliveredCount / readCount / failedCount. Now after each status update the worker does a groupBy and writes accurate counts to the campaign.
+
+Bug 3 — Error column always blank (webhook.worker.ts)
+Meta's failure reason was in updateData.errorMessage but was never written to CampaignContact. Now saved. You'll see the exact error (e.g. "The number is not registered on WhatsApp") in the campaign detail table.
+
+Why one of your 2 contacts wasn't received
+Both API calls returned HTTP 200 (Meta accepted them), so sentCount = 2. The actual delivery failure arrives later via a webhook — Meta sends status: "failed" with an error like code 131026 ("number not on WhatsApp"). Since webhooks weren't configured, that failure was invisible. After the fixes above, once webhooks are working, you'll see:
+
+The failed contact in the campaign detail table with the error reason
+Delivered % will reflect real delivery
+How to connect Meta Webhooks
+Step 1 — Get your webhook URL and verify token
+Your webhook URL is already generated and stored. Run this on your server to get it:
+
+
+SELECT "phoneNumberId", "webhookVerifyToken" FROM "WhatsAppNumber";
+Your webhook URL is:
+
+
+https://wazenly.homestudy.online/api/webhooks/meta/{phoneNumberId}
+Step 2 — Configure in Meta Developer Console
+Go to developers.facebook.com → your app → WhatsApp → Configuration
+Under Webhook, click Edit
+Callback URL: https://wazenly.homestudy.online/api/webhooks/meta/{your_phoneNumberId}
+Verify token: the value from webhookVerifyToken in your DB
+Click Verify and Save
+Step 3 — Subscribe to webhook fields
+After verification, subscribe to these fields:
+
+messages — incoming messages to your inbox
+message_deliveries — delivery confirmations
+message_reads — read receipts
+message_template_status_update — template approvals
+Step 4 — Verify it works
+Send a test message. Within seconds you should see:
+
+Delivered % update in the campaign detail
+Incoming replies appear in your Inbox
+Failed deliveries show the error reason in the contact table
+Note: Your code at numbers.ts:70 already tries to auto-register the webhook when a number is added, but it silently fails if the access token doesn't have the whatsapp_business_management permission. If auto-registration failed, follow the manual steps above.

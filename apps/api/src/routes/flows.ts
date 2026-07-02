@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 
 export const flowsRouter = Router();
 flowsRouter.use(requireAuth, requireWorkspace);
@@ -46,7 +46,7 @@ flowsRouter.get("/", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/flows
-flowsRouter.post("/", async (req: AuthRequest, res, next) => {
+flowsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const body = flowSchema.parse(req.body);
     const flow = await prisma.flow.create({
@@ -86,7 +86,7 @@ flowsRouter.get("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // PUT /api/flows/:id
-flowsRouter.put("/:id", async (req: AuthRequest, res, next) => {
+flowsRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     const body = flowSchema.parse(req.body);
 
@@ -154,7 +154,7 @@ flowsRouter.put("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/flows/:id/activate
-flowsRouter.post("/:id/activate", async (req: AuthRequest, res, next) => {
+flowsRouter.post("/:id/activate", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.flow.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -167,7 +167,7 @@ flowsRouter.post("/:id/activate", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/flows/:id/deactivate
-flowsRouter.post("/:id/deactivate", async (req: AuthRequest, res, next) => {
+flowsRouter.post("/:id/deactivate", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.flow.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -180,7 +180,7 @@ flowsRouter.post("/:id/deactivate", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/flows/:id
-flowsRouter.delete("/:id", async (req: AuthRequest, res, next) => {
+flowsRouter.delete("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.flow.deleteMany({ where: { id: req.params.id, workspaceId: req.workspaceId! } });
     res.json({ success: true });

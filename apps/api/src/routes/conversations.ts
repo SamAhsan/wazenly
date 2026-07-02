@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 
 export const conversationsRouter = Router();
 conversationsRouter.use(requireAuth, requireWorkspace);
@@ -82,7 +82,7 @@ conversationsRouter.get("/:id/messages", async (req: AuthRequest, res, next) => 
 });
 
 // POST /api/conversations/:id/assign
-conversationsRouter.post("/:id/assign", async (req: AuthRequest, res, next) => {
+conversationsRouter.post("/:id/assign", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { userId } = z.object({ userId: z.string().nullable() }).parse(req.body);
     await prisma.conversation.updateMany({
@@ -96,7 +96,7 @@ conversationsRouter.post("/:id/assign", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/conversations/:id/resolve
-conversationsRouter.post("/:id/resolve", async (req: AuthRequest, res, next) => {
+conversationsRouter.post("/:id/resolve", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.conversation.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -109,7 +109,7 @@ conversationsRouter.post("/:id/resolve", async (req: AuthRequest, res, next) => 
 });
 
 // POST /api/conversations/:id/reopen
-conversationsRouter.post("/:id/reopen", async (req: AuthRequest, res, next) => {
+conversationsRouter.post("/:id/reopen", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.conversation.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -122,7 +122,7 @@ conversationsRouter.post("/:id/reopen", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/conversations/:id/notes
-conversationsRouter.post("/:id/notes", async (req: AuthRequest, res, next) => {
+conversationsRouter.post("/:id/notes", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { body } = z.object({ body: z.string().min(1) }).parse(req.body);
     const conversation = await prisma.conversation.findFirst({
@@ -160,7 +160,7 @@ conversationsRouter.get("/:id/notes", async (req: AuthRequest, res, next) => {
 });
 
 // PATCH /api/conversations/:id/read
-conversationsRouter.patch("/:id/read", async (req: AuthRequest, res, next) => {
+conversationsRouter.patch("/:id/read", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.conversation.updateMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   LayoutDashboard, MessageSquare, Megaphone, Users, FileText,
-  Workflow, Phone, BarChart3, Settings, MessageCircle, ChevronRight, X,
+  Workflow, Phone, BarChart3, Settings, MessageCircle, ChevronRight, X, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,10 +16,13 @@ const navItems = [
   { href: "/dashboard/contacts", label: "Contacts", icon: Users },
   { href: "/dashboard/templates", label: "Templates", icon: FileText },
   { href: "/dashboard/flows", label: "Flows", icon: Workflow },
-  { href: "/dashboard/numbers", label: "Numbers", icon: Phone },
+  { href: "/dashboard/numbers", label: "Numbers", icon: Phone, minRole: "ADMIN" },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings, minRole: "ADMIN" },
+  { href: "/dashboard/admin/diagnostics", label: "Diagnostics", icon: Activity, minRole: "OWNER" },
 ];
+
+const ROLES_HIERARCHY: Record<string, number> = { OWNER: 5, ADMIN: 4, MANAGER: 3, AGENT: 2, VIEWER: 1 };
 
 interface SidebarProps {
   mobileOpen?: boolean;
@@ -27,6 +31,9 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const roleLevel = ROLES_HIERARCHY[session?.role || ""] || 0;
+  const visibleNavItems = navItems.filter((item) => !item.minRole || roleLevel >= ROLES_HIERARCHY[item.minRole]);
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -50,7 +57,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => {
+        {visibleNavItems.map(({ href, label, icon: Icon }) => {
           const isActive = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
           return (
             <Link

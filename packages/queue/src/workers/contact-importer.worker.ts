@@ -2,6 +2,7 @@ import { Worker, Job } from "bullmq";
 import { prisma } from "@wazenly/db";
 import { QUEUE_NAMES, normalizePhone, isValidPhone } from "@wazenly/shared";
 import { redisConnection } from "../redis";
+import { notifyOnFinalJobFailure } from "../services/notification.service";
 
 interface ContactImportJobData {
   workspaceId: string;
@@ -81,6 +82,9 @@ export function createContactImporterWorker() {
 
   worker.on("failed", (job, err) => {
     console.error(`[ContactImporterWorker] Job ${job?.id} failed:`, err.message);
+    if (job?.data.workspaceId) {
+      notifyOnFinalJobFailure(job, job.data.workspaceId, "Contact import", err.message).catch(() => {});
+    }
   });
 
   return worker;

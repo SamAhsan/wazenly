@@ -2,7 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
-import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { encrypt, decrypt } from "@wazenly/shared";
 import { MetaApiService } from "../services/meta.service";
 import { templateSyncQueue } from "@wazenly/queue";
@@ -36,7 +36,7 @@ numbersRouter.get("/", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/numbers
-numbersRouter.post("/", async (req: AuthRequest, res, next) => {
+numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const body = numberSchema.parse(req.body);
 
@@ -112,7 +112,7 @@ numbersRouter.get("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // PUT /api/numbers/:id
-numbersRouter.put("/:id", async (req: AuthRequest, res, next) => {
+numbersRouter.put("/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const schema = z.object({
       displayName: z.string().min(2).optional(),
@@ -143,7 +143,7 @@ numbersRouter.put("/:id", async (req: AuthRequest, res, next) => {
 });
 
 // POST /api/numbers/:id/rotate-token
-numbersRouter.post("/:id/rotate-token", async (req: AuthRequest, res, next) => {
+numbersRouter.post("/:id/rotate-token", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const { accessToken } = z.object({ accessToken: z.string() }).parse(req.body);
     const meta = new MetaApiService(accessToken, "");
@@ -159,7 +159,7 @@ numbersRouter.post("/:id/rotate-token", async (req: AuthRequest, res, next) => {
 });
 
 // DELETE /api/numbers/:id
-numbersRouter.delete("/:id", async (req: AuthRequest, res, next) => {
+numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.whatsAppNumber.deleteMany({
       where: { id: req.params.id, workspaceId: req.workspaceId! },

@@ -2,13 +2,104 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { Bell, ChevronDown, LogOut, Settings, User, Phone, CheckCircle, Menu } from "lucide-react";
-import { getInitials } from "@/lib/utils";
+import { getInitials, formatRelativeTime } from "@/lib/utils";
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { io, Socket } from "socket.io-client";
+import Link from "next/link";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 
 type WhatsAppNumber = { id: string; displayName: string; phoneNumber: string; status: string };
+type Notification = { id: string; type: string; title: string; message: string; link?: string; readAt: string | null; createdAt: string };
+
+function NotificationBell() {
+  const { data: session } = useSession();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const { data: unread } = useQuery({
+    queryKey: ["notifications-unread-count"],
+    queryFn: () => api.get("/notifications/unread-count").then((r) => r.data.count as number),
+    refetchInterval: 30000,
+  });
+
+  const { data: notifications = [] } = useQuery<Notification[]>({
+    queryKey: ["notifications"],
+    queryFn: () => api.get("/notifications").then((r) => r.data),
+    enabled: open,
+  });
+
+  const markReadMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/notifications/${id}/read`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+    },
+  });
+
+  const markAllReadMutation = useMutation({
+    mutationFn: () => api.post("/notifications/read-all"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+    },
+  });
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+    const socket: Socket = io(process.env.NEXT_PUBLIC_API_URL?.replace("/api", "") || "http://localhost:4000", {
+      auth: { token: session.accessToken },
+    });
+    socket.on("notification:new", () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
+    });
+    return () => { socket.disconnect(); };
+  }, [session?.accessToken, queryClient]);
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)} className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+        <Bell className="w-5 h-5" />
+        {!!unread && unread > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-xl shadow-lg border border-gray-100 z-20 max-h-96 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <p className="text-sm font-semibold text-gray-900">Notifications</p>
+              {!!unread && unread > 0 && (
+                <button onClick={() => markAllReadMutation.mutate()} className="text-xs text-primary font-medium hover:underline">
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {notifications.length === 0 && (
+                <p className="text-center text-sm text-gray-400 py-8">No notifications yet</p>
+              )}
+              {notifications.map((n) => (
+                <Link
+                  key={n.id}
+                  href={n.link || "#"}
+                  onClick={() => { if (!n.readAt) markReadMutation.mutate(n.id); setOpen(false); }}
+                  className={`block px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.readAt ? "bg-primary/5" : ""}`}
+                >
+                  <p className="text-sm font-medium text-gray-900">{n.title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{n.message}</p>
+                  <p className="text-xs text-gray-400 mt-1">{formatRelativeTime(n.createdAt)}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
@@ -99,10 +190,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       <div className="flex items-center gap-3">
-        <button className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-        </button>
+        <NotificationBell />
 
         <div className="relative">
           <button

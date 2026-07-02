@@ -29,6 +29,8 @@ model User {
   workspaceMembers  WorkspaceMember[]
   assignedConvos    Conversation[]    @relation("AssignedConversations")
   notes             ConversationNote[]
+  sentInvitations   Invitation[]
+  notifications     Notification[]
 }
 
 model Account {
@@ -74,6 +76,14 @@ model PasswordResetToken {
   createdAt DateTime @default(now())
 }
 
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  tokenHash String   @unique
+  expires   DateTime
+  createdAt DateTime @default(now())
+}
+
 // ─────────────────────────────────────────────────────────
 // WORKSPACE & TEAM
 // ─────────────────────────────────────────────────────────
@@ -99,6 +109,7 @@ model Workspace {
   conversations Conversation[]
   flows         Flow[]
   webhooks      WebhookEndpoint[]
+  invitations   Invitation[]
   subscription  Subscription?
   plan          BillingPlan?     @relation(fields: [planId], references: [id])
 }
@@ -124,6 +135,24 @@ model WorkspaceMember {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+}
+
+model Invitation {
+  id              String     @id @default(cuid())
+  workspaceId     String
+  email           String
+  role            MemberRole
+  tokenHash       String     @unique
+  invitedByUserId String
+  expires         DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime   @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation(fields: [invitedByUserId], references: [id])
+
+  @@index([workspaceId])
+  @@unique([workspaceId, email])
 }
 
 model ApiKey {
@@ -276,6 +305,7 @@ model Contact {
   campaignContacts CampaignContact[]
   conversations    Conversation[]
   messages         Message[]
+  flowSessions     FlowSession[]
 
   @@unique([workspaceId, phone])
   @@index([workspaceId])
@@ -549,6 +579,7 @@ model Flow {
   nodes     FlowNode[]
   edges     FlowEdge[]
   triggers  FlowTrigger[]
+  sessions  FlowSession[]
 }
 
 model FlowNode {
@@ -583,6 +614,29 @@ enum FlowTriggerType {
   ANY_MESSAGE
   OPT_IN
   CAMPAIGN_REPLY
+}
+
+enum FlowSessionState {
+  WAITING_INPUT
+  WAITING_DELAY
+}
+
+model FlowSession {
+  id          String           @id @default(cuid())
+  workspaceId String
+  flowId      String
+  contactId   String
+  numberId    String
+  nodeId      String
+  state       FlowSessionState
+  variables   Json             @default("{}")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  flow    Flow    @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, numberId])
 }
 
 model FlowTrigger {
@@ -624,6 +678,52 @@ model WebhookEvent {
   createdAt  DateTime @default(now())
 
   endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────────────────
+
+enum NotificationType {
+  INVITATION_ACCEPTED
+  TEAM_MEMBER_JOINED
+  CAMPAIGN_COMPLETED
+  TEMPLATE_APPROVED
+  WEBHOOK_FAILED
+  QUEUE_JOB_FAILED
+  NEW_MESSAGE
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  workspaceId String
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  link        String?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([workspaceId])
+}
+
+// ─────────────────────────────────────────────────────────
+// DIAGNOSTICS
+// ─────────────────────────────────────────────────────────
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // ─────────────────────────────────────────────────────────

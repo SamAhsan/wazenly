@@ -52,4 +52,14 @@ export const notificationSenderQueue = new Queue(QUEUE_NAMES.NOTIFICATION_SENDER
   },
 });
 
+export const flowExecutorQueue = new Queue(QUEUE_NAMES.FLOW_EXECUTOR, {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 200 },
+  },
+});
+
 export { connection };

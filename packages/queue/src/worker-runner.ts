@@ -6,6 +6,8 @@ import { createCampaignWorker } from "./workers/campaign.worker";
 import { createWebhookWorker } from "./workers/webhook.worker";
 import { createTemplateSyncWorker } from "./workers/template-sync.worker";
 import { createContactImporterWorker } from "./workers/contact-importer.worker";
+import { createFlowWorker } from "./workers/flow.worker";
+import { createNotificationWorker } from "./workers/notification.worker";
 import { templateSyncQueue } from "./queues";
 import { prisma } from "@wazenly/db";
 
@@ -17,6 +19,8 @@ async function startWorkers() {
     createWebhookWorker(),
     createTemplateSyncWorker(),
     createContactImporterWorker(),
+    createFlowWorker(),
+    createNotificationWorker(),
   ];
 
   // Schedule hourly template sync for all connected numbers

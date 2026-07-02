@@ -14,6 +14,7 @@ export const QUEUE_NAMES = {
   TEMPLATE_SYNC: "template-sync",
   CONTACT_IMPORTER: "contact-importer",
   NOTIFICATION_SENDER: "notification-sender",
+  FLOW_EXECUTOR: "flow-executor",
 } as const;
 
 export const CAMPAIGN_BATCH_SIZE = 50;

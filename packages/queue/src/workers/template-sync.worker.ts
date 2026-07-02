@@ -4,6 +4,7 @@ import { prisma } from "@wazenly/db";
 import { QUEUE_NAMES, META_GRAPH_URL, decrypt } from "@wazenly/shared";
 import { redisConnection } from "../redis";
 import { templateSyncQueue } from "../queues";
+import { notifyUsers, getMembersWithMinRole, notifyOnFinalJobFailure } from "../services/notification.service";
 
 interface TemplateSyncJobData {
   workspaceId: string;
@@ -68,13 +69,17 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
 
       const existing = await prisma.template.findFirst({
         where: { workspaceId, metaId: t.id },
-        select: { id: true },
+        select: { id: true, status: true },
       });
       if (existing) {
         await prisma.template.update({
           where: { id: existing.id },
           data: { status: t.status as any, metaId: t.id, lastSyncedAt: new Date() },
         });
+        if (existing.status !== "APPROVED" && t.status === "APPROVED") {
+          const recipients = await getMembersWithMinRole(workspaceId, "MANAGER");
+          await notifyUsers(workspaceId, recipients, "TEMPLATE_APPROVED", "Template approved", `"${t.name}" was approved by Meta.`, "/dashboard/templates").catch(() => {});
+        }
       } else {
         await prisma.template.create({
           data: {
@@ -113,6 +118,9 @@ export function createTemplateSyncWorker() {
 
   worker.on("failed", (job, err) => {
     console.error(`[TemplateSyncWorker] Job ${job?.id} failed:`, err.message);
+    if (job?.data.workspaceId) {
+      notifyOnFinalJobFailure(job, job.data.workspaceId, "Template sync", err.message).catch(() => {});
+    }
   });
 
   return worker;

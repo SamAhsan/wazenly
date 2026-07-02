@@ -21,6 +21,9 @@ import { webhooksRouter } from "./routes/webhooks";
 import { analyticsRouter } from "./routes/analytics";
 import { flowsRouter } from "./routes/flows";
 import { settingsRouter } from "./routes/settings";
+import { invitationsRouter } from "./routes/invitations";
+import { notificationsRouter } from "./routes/notifications";
+import { adminRouter } from "./routes/admin";
 import { apiV1Router } from "./routes/api-v1";
 import { docsRouter } from "./routes/docs";
 
@@ -31,6 +34,8 @@ import {
   createWebhookWorker,
   createTemplateSyncWorker,
   createContactImporterWorker,
+  createFlowWorker,
+  createNotificationWorker,
 } from "@wazenly/queue";
 
 const app = express();
@@ -76,6 +81,9 @@ app.use("/api/conversations", conversationsRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/flows", flowsRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/invitations", invitationsRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/admin", adminRouter);
 app.use("/api/v1", apiV1Router);
 app.use("/api/docs", docsRouter);
 
@@ -92,6 +100,8 @@ createCampaignWorker();
 createWebhookWorker();
 createTemplateSyncWorker();
 createContactImporterWorker();
+createFlowWorker();
+createNotificationWorker(io);
 
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, () => {

@@ -5,6 +5,7 @@ import { decrypt, QUEUE_NAMES, CAMPAIGN_BATCH_SIZE, META_GRAPH_URL, OPT_OUT_KEYW
 import type { CampaignJobData } from "@wazenly/shared";
 import { redisConnection } from "../redis";
 import { campaignSenderQueue } from "../queues";
+import { notifyUsers, getMembersWithMinRole, notifyOnFinalJobFailure } from "../services/notification.service";
 
 async function sendWhatsAppMessage(
   phoneNumberId: string,
@@ -52,6 +53,19 @@ async function isInQuietHours(quietStart: string | null, quietEnd: string | null
   if (!quietStart || !quietEnd) return false;
   const now = new Date().toLocaleTimeString("en-US", { hour12: false, timeZone: timezone, hour: "2-digit", minute: "2-digit" });
   return now >= quietStart && now <= quietEnd;
+}
+
+async function notifyCampaignCompleted(workspaceId: string, campaignId: string): Promise<void> {
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
+  const recipients = await getMembersWithMinRole(workspaceId, "MANAGER");
+  await notifyUsers(
+    workspaceId,
+    recipients,
+    "CAMPAIGN_COMPLETED",
+    "Campaign completed",
+    `"${campaign?.name || campaignId}" has finished sending.`,
+    "/dashboard/campaigns"
+  );
 }
 
 async function upsertDailyAnalytics(
@@ -136,6 +150,7 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
       },
     });
     console.log(`[Campaign ${campaignId}] Completed!`);
+    await notifyCampaignCompleted(workspaceId, campaignId).catch(() => {});
     return;
   }
 
@@ -236,6 +251,7 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
       },
     });
     console.log(`[Campaign ${campaignId}] Completed — sent:${counts.SENT + counts.DELIVERED + counts.READ} failed:${counts.FAILED}`);
+    await notifyCampaignCompleted(workspaceId, campaignId).catch(() => {});
   }
 }
 
@@ -256,6 +272,9 @@ export function createCampaignWorker() {
 
   worker.on("failed", (job, err) => {
     console.error(`[CampaignWorker] Job ${job?.id} failed:`, err.message);
+    if (job?.data.workspaceId) {
+      notifyOnFinalJobFailure(job, job.data.workspaceId, `Campaign send (${job.data.campaignId})`, err.message).catch(() => {});
+    }
   });
 
   return worker;
