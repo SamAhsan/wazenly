@@ -42,16 +42,20 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = http.createServer(app);
 
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
+// CORS_ORIGIN may be a single origin or a comma-separated list (e.g. apex + www + local dev)
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 export const io = new SocketServer(httpServer, {
-  cors: { origin: CORS_ORIGIN, credentials: true },
+  cors: { origin: CORS_ORIGINS, credentials: true },
 });
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: CORS_ORIGIN,
+  origin: CORS_ORIGINS,
   credentials: true,
 }));
 app.use(morgan("combined"));
