@@ -199,6 +199,7 @@ export default function InboxPage() {
           {conversations.map((c: {
             id: string; contactName: string; phone: string; unreadCount: number;
             lastMessageAt: string; status: string; messages?: { body?: string; type: string }[]
+            contact?: { name?: string } | null;
           }) => (
             <button
               key={c.id}
@@ -210,11 +211,11 @@ export default function InboxPage() {
             >
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center text-primary text-sm font-semibold flex-shrink-0">
-                  {getInitials(c.contactName || c.phone)}
+                  {getInitials(c.contact?.name || c.contactName || c.phone)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="font-medium text-gray-900 text-sm truncate">{c.contactName || c.phone}</p>
+                    <p className="font-medium text-gray-900 text-sm truncate">{c.contact?.name || c.contactName || c.phone}</p>
                     <span className="text-xs text-gray-400 flex-shrink-0">{formatRelativeTime(c.lastMessageAt)}</span>
                   </div>
                   <p className="text-xs text-gray-500 truncate mt-0.5">

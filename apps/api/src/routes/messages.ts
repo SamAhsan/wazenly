@@ -42,8 +42,18 @@ messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res,
       const result = await meta.sendText(conversation.phone, body.body);
       metaMessageId = result.id;
     } else if (body.type === "TEMPLATE" && body.templateName) {
+      const template = await prisma.template.findFirst({
+        where: { workspaceId: req.workspaceId!, name: body.templateName },
+      });
+      const components: object[] = [];
+      // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
+      // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
+      if (template && ["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType) && template.headerUrl) {
+        const mediaType = template.headerType.toLowerCase();
+        components.push({ type: "header", parameters: [{ type: mediaType, [mediaType]: { link: template.headerUrl } }] });
+      }
       const vars = body.templateVars ? Object.values(body.templateVars).map((v) => ({ type: "text", text: v })) : [];
-      const components = vars.length ? [{ type: "body", parameters: vars }] : [];
+      if (vars.length) components.push({ type: "body", parameters: vars });
       const result = await meta.sendTemplate(conversation.phone, body.templateName, body.templateLanguage || "en", components);
       metaMessageId = result.id;
     } else if (["IMAGE", "VIDEO", "AUDIO", "DOCUMENT"].includes(body.type) && body.mediaUrl) {

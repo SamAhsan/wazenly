@@ -13,9 +13,20 @@ async function sendWhatsAppMessage(
   to: string,
   templateName: string,
   languageCode: string,
-  variables: Record<string, string>
+  variables: Record<string, string>,
+  header?: { type: string; url?: string | null }
 ): Promise<string> {
   const components: object[] = [];
+
+  // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
+  // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
+  if (header && ["IMAGE", "VIDEO", "DOCUMENT"].includes(header.type) && header.url) {
+    const mediaType = header.type.toLowerCase();
+    components.push({
+      type: "header",
+      parameters: [{ type: mediaType, [mediaType]: { link: header.url } }],
+    });
+  }
 
   const varEntries = Object.entries(variables);
   if (varEntries.length > 0) {
@@ -174,7 +185,8 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
         cc.phone,
         campaign.template!.name,
         campaign.template!.language,
-        variables
+        variables,
+        { type: campaign.template!.headerType, url: campaign.template!.headerUrl }
       );
 
       await prisma.campaignContact.update({

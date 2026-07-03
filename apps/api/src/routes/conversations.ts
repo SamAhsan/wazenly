@@ -23,6 +23,7 @@ conversationsRouter.get("/", async (req: AuthRequest, res, next) => {
         where,
         include: {
           number: { select: { displayName: true, phoneNumber: true } },
+          contact: { select: { name: true } },
           assignedUser: { select: { id: true, name: true, image: true } },
           messages: { take: 1, orderBy: { timestamp: "desc" }, select: { body: true, type: true, direction: true, timestamp: true } },
         },
