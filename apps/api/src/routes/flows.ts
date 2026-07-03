@@ -62,16 +62,52 @@ flowsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, next
         description: body.description,
         numberId: body.numberId,
         status: "DRAFT",
-        nodes: body.nodes?.length
-          ? { create: body.nodes.map((n) => ({ ...n, data: n.data as any })) }
-          : undefined,
         triggers: body.triggers?.length
           ? { create: body.triggers.map((t) => ({ type: t.type, keywords: t.keywords || [] })) }
           : undefined,
       },
+    });
+
+    // Create nodes one-by-one to track React Flow client ID → DB ID mapping (same
+    // approach as PUT below) — edges reference the client-side node IDs, and skipping
+    // this step (as the old code did) meant a brand-new flow's edges never got saved.
+    const nodeIdMap = new Map<string, string>();
+    if (body.nodes?.length) {
+      for (const n of body.nodes) {
+        const dbNode = await prisma.flowNode.create({
+          data: {
+            flowId: flow.id,
+            type: n.type,
+            label: n.label,
+            positionX: n.positionX,
+            positionY: n.positionY,
+            data: n.data as any,
+          },
+          select: { id: true },
+        });
+        nodeIdMap.set(n.id, dbNode.id);
+      }
+    }
+
+    if (body.edges?.length) {
+      await prisma.flowEdge.createMany({
+        data: body.edges
+          .filter((e) => nodeIdMap.has(e.sourceNodeId) && nodeIdMap.has(e.targetNodeId))
+          .map((e) => ({
+            flowId: flow.id,
+            sourceNodeId: nodeIdMap.get(e.sourceNodeId)!,
+            targetNodeId: nodeIdMap.get(e.targetNodeId)!,
+            label: e.label,
+            condition: e.condition as any,
+          })),
+      });
+    }
+
+    const created = await prisma.flow.findFirst({
+      where: { id: flow.id },
       include: { nodes: true, edges: true, triggers: true },
     });
-    res.status(201).json(flow);
+    res.status(201).json(created);
   } catch (err) {
     next(err);
   }

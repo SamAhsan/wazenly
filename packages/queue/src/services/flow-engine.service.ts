@@ -12,6 +12,14 @@ export interface ExecCtx {
   variables: Record<string, unknown>;
 }
 
+// The flow builder always saves a node's actual settings nested under data.config
+// (see NodeConfigPanel.tsx) — data itself also carries label/type. Falls back to
+// data directly for any node saved before this nesting existed.
+function getNodeConfig<T>(data: unknown): T {
+  const obj = (data || {}) as Record<string, unknown>;
+  return (obj.config ?? obj) as T;
+}
+
 export interface TriggerConfig {
   matchType: "keyword" | "exact" | "contains" | "regex" | "starts_with" | "any_message" | "first_message" | "returning_customer";
   keywords?: string[];
@@ -340,13 +348,13 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
     console.log(`[FlowEngine] Executing node ${node.id} (type=${node.type}) in flow "${ctx.flow.name}" for contact ${ctx.contact.id}`);
 
     if (node.type === "message") {
-      await runMessageNode(ctx, node.data as unknown as MessageConfig);
+      await runMessageNode(ctx, getNodeConfig<MessageConfig>(node.data));
       currentNodeId = await getFirstEdgeTarget(ctx.flow.id, node.id);
       continue;
     }
 
     if (node.type === "condition") {
-      const config = node.data as unknown as ConditionConfig;
+      const config = getNodeConfig<ConditionConfig>(node.data);
       const result = evaluateCondition(ctx, config);
       const edges = await prisma.flowEdge.findMany({ where: { flowId: ctx.flow.id, sourceNodeId: node.id } });
       const branch = edges.find((e) => e.label === (result ? "Yes" : "No")) || edges[result ? 0 : 1];
@@ -355,13 +363,13 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
     }
 
     if (node.type === "action") {
-      await runActionNode(ctx, node.data as unknown as ActionConfig);
+      await runActionNode(ctx, getNodeConfig<ActionConfig>(node.data));
       currentNodeId = await getFirstEdgeTarget(ctx.flow.id, node.id);
       continue;
     }
 
     if (node.type === "input") {
-      const config = node.data as unknown as InputConfig;
+      const config = getNodeConfig<InputConfig>(node.data);
       await sendText(ctx, interpolate(config.question, ctx));
       await prisma.flowSession.upsert({
         where: { contactId_numberId: { contactId: ctx.contact.id, numberId: ctx.number.id } },
@@ -380,7 +388,7 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
     }
 
     if (node.type === "delay") {
-      const config = node.data as unknown as DelayConfig;
+      const config = getNodeConfig<DelayConfig>(node.data);
       const businessHoursResume = nextBusinessHoursStart(config, ctx.workspace.timezone);
       const delayMs = businessHoursResume ? businessHoursResume.getTime() - Date.now() : delayToMs(config);
 
@@ -403,7 +411,7 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
     }
 
     if (node.type === "jump") {
-      const config = node.data as unknown as JumpConfig;
+      const config = getNodeConfig<JumpConfig>(node.data);
       if (config.targetType === "end") {
         await clearSession(ctx.contact.id, ctx.number.id);
         return;
@@ -492,7 +500,7 @@ export async function findMatchingFlowStart(
       continue;
     }
     for (const triggerNode of triggerNodes) {
-      const config = triggerNode.data as unknown as TriggerConfig;
+      const config = getNodeConfig<TriggerConfig>(triggerNode.data);
       const matched = matchesTrigger(config, messageText, isFirstMessage, isReturningCustomer);
       console.log(
         `[FlowEngine] Flow "${flow.name}" trigger ${triggerNode.id} — matchType=${config.matchType} keywords=${JSON.stringify(config.keywords || [])} → ${matched ? "MATCH" : "no match"}`
@@ -531,7 +539,7 @@ export async function resumeWaitingInput(
   replyText: string
 ): Promise<void> {
   const node = await prisma.flowNode.findUnique({ where: { id: waitingNodeId } });
-  const config = (node?.data || {}) as unknown as InputConfig;
+  const config = getNodeConfig<InputConfig>(node?.data);
 
   if (!validateInput(config, replyText)) {
     await sendText(ctx, `That doesn't look right. ${config.question}`);
