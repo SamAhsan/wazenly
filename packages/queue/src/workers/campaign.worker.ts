@@ -65,6 +65,10 @@ async function sendWhatsAppMessage(
   return response.data.messages?.[0]?.id as string;
 }
 
+function renderTemplateBody(body: string, variables: Record<string, string>): string {
+  return body.replace(/\{\{(\d+)\}\}/g, (_, n: string) => variables[n] ?? `{{${n}}}`);
+}
+
 async function isInQuietHours(quietStart: string | null, quietEnd: string | null, timezone: string): Promise<boolean> {
   if (!quietStart || !quietEnd) return false;
   const now = new Date().toLocaleTimeString("en-US", { hour12: false, timeZone: timezone, hour: "2-digit", minute: "2-digit" });
@@ -200,6 +204,46 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
       });
       sentCount++;
       await upsertDailyAnalytics(workspaceId, campaign.number.id, "messagesSent").catch(() => {});
+
+      // Reflect the send in the Inbox immediately (not just once/if the contact replies),
+      // and give the status-update handler in webhook.worker.ts a Message row to find —
+      // it already looks one up by metaMessageId, but had nothing to match without this.
+      try {
+        const contact = cc.contactId ? await prisma.contact.findUnique({ where: { id: cc.contactId }, select: { name: true } }) : null;
+        const conversation = await prisma.conversation.upsert({
+          where: { workspaceId_numberId_phone: { workspaceId, numberId: campaign.number.id, phone: cc.phone } },
+          update: { lastMessageAt: new Date(), contactName: contact?.name || undefined },
+          create: {
+            workspaceId,
+            numberId: campaign.number.id,
+            contactId: cc.contactId,
+            phone: cc.phone,
+            contactName: contact?.name || cc.phone,
+            lastMessageAt: new Date(),
+            status: "OPEN",
+          },
+        });
+        await prisma.message.create({
+          data: {
+            workspaceId,
+            conversationId: conversation.id,
+            numberId: campaign.number.id,
+            contactId: cc.contactId,
+            phone: cc.phone,
+            direction: "OUTBOUND",
+            type: "TEMPLATE",
+            status: "SENT",
+            metaMessageId: msgId,
+            body: renderTemplateBody(campaign.template!.body, variables),
+            templateName: campaign.template!.name,
+            templateVars: variables,
+            timestamp: new Date(),
+            sentAt: new Date(),
+          },
+        });
+      } catch (inboxErr) {
+        console.error(`[Campaign ${campaignId}] Failed to record inbox message for ${cc.phone}:`, (inboxErr as Error).message);
+      }
 
       // Rate limit delay
       await new Promise((r) => setTimeout(r, delayMs));

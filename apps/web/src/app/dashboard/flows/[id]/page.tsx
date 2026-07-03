@@ -9,10 +9,11 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Save, ChevronLeft, Plus } from "lucide-react";
+import { Save, ChevronLeft, Plus, Play, Pause } from "lucide-react";
 import api from "@/lib/api";
 import { NodeConfigPanel, type NodeData } from "@/components/flows/NodeConfigPanel";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { statusColor } from "@/lib/utils";
 
 const NODE_COLORS: Record<string, string> = {
   trigger: "#25D366",
@@ -70,7 +71,7 @@ function FlowEditorPageContent() {
   const [flowName, setFlowName] = useState("Untitled Flow");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  const { data: flow } = useQuery({
+  const { data: flow, refetch: refetchFlow } = useQuery({
     queryKey: ["flow", id],
     queryFn: () => api.get(`/flows/${id}`).then((r) => r.data),
     enabled: !isNew,
@@ -113,6 +114,18 @@ function FlowEditorPageContent() {
     onError: () => toast.error("Failed to save"),
   });
 
+  const activateMutation = useMutation({
+    mutationFn: () => api.post(`/flows/${id}/activate`),
+    onSuccess: () => { toast.success("Flow activated — it will now respond to matching messages"); refetchFlow(); },
+    onError: () => toast.error("Failed to activate"),
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: () => api.post(`/flows/${id}/deactivate`),
+    onSuccess: () => { toast.success("Flow paused"); refetchFlow(); },
+    onError: () => toast.error("Failed to pause"),
+  });
+
   function addNode(type: string) {
     const newNode: Node<NodeData> = {
       id: `${type}-${Date.now()}`,
@@ -140,13 +153,32 @@ function FlowEditorPageContent() {
             <ChevronLeft className="w-4 h-4" />
           </button>
           <input value={flowName} onChange={(e) => setFlowName(e.target.value)} className="font-semibold text-gray-900 bg-transparent border-0 focus:outline-none focus:ring-2 focus:ring-primary/30 rounded px-2 py-1" />
+          {!isNew && flow?.status && (
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(flow.status)}`}>{flow.status}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {!isNew && flow?.status && (
+            flow.status === "ACTIVE" ? (
+              <button onClick={() => deactivateMutation.mutate()} disabled={deactivateMutation.isPending} className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-70">
+                <Pause className="w-4 h-4" /> Pause
+              </button>
+            ) : (
+              <button onClick={() => activateMutation.mutate()} disabled={activateMutation.isPending} className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-70">
+                <Play className="w-4 h-4" /> Activate
+              </button>
+            )
+          )}
           <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-70">
             <Save className="w-4 h-4" /> {saveMutation.isPending ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
+      {!isNew && flow?.status && flow.status !== "ACTIVE" && (
+        <div className="bg-amber-50 border-b border-amber-100 px-5 py-2 text-xs text-amber-700">
+          This flow is not active — it won&apos;t respond to any messages until you click Activate.
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Node palette */}
