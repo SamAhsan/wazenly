@@ -7,13 +7,15 @@ import { Plus, Workflow, Play, Pause, Trash2, Edit } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 function FlowsPageContent() {
   const queryClient = useQueryClient();
+  const { selectedNumberId } = useSelectedNumber();
 
   const { data: flows = [], isLoading } = useQuery({
-    queryKey: ["flows"],
-    queryFn: () => api.get("/flows").then((r) => r.data),
+    queryKey: ["flows", selectedNumberId],
+    queryFn: () => api.get("/flows", { params: selectedNumberId ? { numberId: selectedNumberId } : {} }).then((r) => r.data),
   });
 
   const activateMutation = useMutation({
@@ -73,7 +75,7 @@ function FlowsPageContent() {
 
             <div className="flex items-center gap-3 text-xs text-gray-400 mb-4">
               <span>{f._count?.nodes || 0} nodes</span>
-              {f.number && <span>· {f.number.displayName}</span>}
+              <span>· {f.number ? f.number.displayName : "All Numbers"}</span>
               <span>· {formatRelativeTime(f.updatedAt)}</span>
             </div>
 

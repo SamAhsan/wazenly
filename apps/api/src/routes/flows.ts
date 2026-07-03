@@ -9,7 +9,7 @@ flowsRouter.use(requireAuth, requireWorkspace);
 const flowSchema = z.object({
   name: z.string().min(2),
   description: z.string().optional(),
-  numberId: z.string().optional(),
+  numberId: z.string().nullable().optional(),
   nodes: z.array(z.object({
     id: z.string(),
     type: z.string(),
@@ -34,9 +34,15 @@ const flowSchema = z.object({
 // GET /api/flows
 flowsRouter.get("/", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
+    const { numberId } = req.query as { numberId?: string };
+    const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
+    // A flow with no numberId applies to every number, so it should show up
+    // regardless of which one is selected — same rule findMatchingFlowStart uses.
+    if (numberId) where.OR = [{ numberId }, { numberId: null }];
+
     const flows = await prisma.flow.findMany({
-      where: { workspaceId: req.workspaceId! },
-      include: { _count: { select: { nodes: true } } },
+      where,
+      include: { _count: { select: { nodes: true } }, number: { select: { displayName: true } } },
       orderBy: { createdAt: "desc" },
     });
     res.json(flows);

@@ -14,6 +14,7 @@ import api from "@/lib/api";
 import { NodeConfigPanel, type NodeData } from "@/components/flows/NodeConfigPanel";
 import { RoleGuard } from "@/components/layout/role-guard";
 import { statusColor } from "@/lib/utils";
+import { useSelectedNumber } from "@/contexts/number-context";
 
 const NODE_COLORS: Record<string, string> = {
   trigger: "#25D366",
@@ -70,6 +71,8 @@ function FlowEditorPageContent() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(isNew ? INITIAL_EDGES : []);
   const [flowName, setFlowName] = useState("Untitled Flow");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const { numbers, selectedNumberId } = useSelectedNumber();
+  const [flowNumberId, setFlowNumberId] = useState<string>("");
 
   const { data: flow, refetch: refetchFlow } = useQuery({
     queryKey: ["flow", id],
@@ -78,8 +81,14 @@ function FlowEditorPageContent() {
   });
 
   useEffect(() => {
+    if (isNew) setFlowNumberId(selectedNumberId || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew]);
+
+  useEffect(() => {
     if (flow) {
       setFlowName(flow.name);
+      setFlowNumberId(flow.numberId || "");
       if (flow.nodes?.length) {
         setNodes(flow.nodes.map((n: { id: string; type: string; positionX: number; positionY: number; data: object; label: string }) => ({
           id: n.id, type: "custom", position: { x: n.positionX, y: n.positionY }, data: { ...n.data, label: n.label, type: n.type },
@@ -102,6 +111,7 @@ function FlowEditorPageContent() {
     mutationFn: () => {
       const payload = {
         name: flowName,
+        numberId: flowNumberId || null,
         nodes: nodes.map((n) => ({ id: n.id, type: n.data.type, label: n.data.label, positionX: n.position.x, positionY: n.position.y, data: n.data })),
         edges: edges.map((e) => ({ id: e.id, sourceNodeId: e.source, targetNodeId: e.target, label: e.label as string | undefined })),
       };
@@ -158,6 +168,15 @@ function FlowEditorPageContent() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={flowNumberId}
+            onChange={(e) => setFlowNumberId(e.target.value)}
+            title="Which WhatsApp number this flow responds on"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          >
+            <option value="">All Numbers</option>
+            {numbers.map((n) => <option key={n.id} value={n.id}>{n.displayName}</option>)}
+          </select>
           {!isNew && flow?.status && (
             flow.status === "ACTIVE" ? (
               <button onClick={() => deactivateMutation.mutate()} disabled={deactivateMutation.isPending} className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-70">
