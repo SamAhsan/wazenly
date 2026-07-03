@@ -11,7 +11,7 @@ api.interceptors.request.use(async (config) => {
   if (session?.accessToken) {
     config.headers.Authorization = `Bearer ${session.accessToken}`;
   }
-  const workspaceId = typeof window !== "undefined" ? localStorage.getItem("workspaceId") : null;
+  const workspaceId = typeof window !== "undefined" ? sessionStorage.getItem("workspaceId") : null;
   if (workspaceId) {
     config.headers["x-workspace-id"] = workspaceId;
   }

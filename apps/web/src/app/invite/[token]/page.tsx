@@ -40,7 +40,7 @@ export default function InvitePage() {
     api
       .post(`/invitations/${token}/accept`)
       .then((r) => {
-        localStorage.setItem("workspaceId", r.data.workspace.id);
+        sessionStorage.setItem("workspaceId", r.data.workspace.id);
         toast.success(`You've joined ${preview.workspaceName}`);
         router.push("/dashboard");
       })
