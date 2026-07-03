@@ -48,7 +48,12 @@ messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res,
       const components: object[] = [];
       // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
       // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
-      if (template && ["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType) && template.headerUrl) {
+      if (template && ["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType)) {
+        if (!template.headerUrl) {
+          return res.status(400).json({
+            error: `This template requires a ${template.headerType.toLowerCase()} header but no header media URL is set. Add one in Templates.`,
+          });
+        }
         const mediaType = template.headerType.toLowerCase();
         components.push({ type: "header", parameters: [{ type: mediaType, [mediaType]: { link: template.headerUrl } }] });
       }

@@ -219,6 +219,32 @@ templatesRouter.get("/:id", requireRole("AGENT"), async (req: AuthRequest, res, 
   }
 });
 
+// PUT /api/templates/:id/header-media — set the send-time header image/video/document URL.
+// Meta's template sync API never returns a reusable media reference (only an opaque,
+// single-use upload handle from template creation), so for templates approved directly
+// in Meta and synced in, this has to be supplied manually before the template can be sent.
+templatesRouter.put("/:id/header-media", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const { headerUrl } = z.object({ headerUrl: z.string().url() }).parse(req.body);
+
+    const template = await prisma.template.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType)) {
+      return res.status(400).json({ error: "This template's header type doesn't use a media URL" });
+    }
+
+    const updated = await prisma.template.update({
+      where: { id: template.id },
+      data: { headerUrl },
+    });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/templates/:id
 templatesRouter.delete("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
@@ -279,7 +305,9 @@ templatesRouter.post("/sync", requireRole("MANAGER"), async (req: AuthRequest, r
             status: t.status,
             headerType: (headerComp?.format?.toUpperCase() || "NONE") as any,
             headerText: headerComp?.format === "TEXT" ? headerComp.text : undefined,
-            headerUrl: headerComp?.example?.header_url?.[0],
+            // Meta's template API never returns a reusable media URL for header examples —
+            // only an opaque, single-use upload handle. A sendable headerUrl has to be set
+            // manually afterward via PUT /:id/header-media for IMAGE/VIDEO/DOCUMENT headers.
             body: bodyComp?.text || "",
             footer: footerComp?.text,
             buttons: buttonComp?.buttons ?? null,

@@ -20,7 +20,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 type Template = {
   id: string; name: string; category: string; language: string; status: string;
-  body: string; lastUsedAt: string | null; headerType: string; footer?: string;
+  body: string; lastUsedAt: string | null; headerType: string; headerUrl?: string | null; footer?: string;
   buttons?: { text: string }[];
 };
 
@@ -61,6 +61,18 @@ function TemplatesPageContent() {
     onError: (e: { response?: { data?: { error?: string } } }) =>
       toast.error(e.response?.data?.error || "Failed to sync templates"),
   });
+
+  const setHeaderMediaMutation = useMutation({
+    mutationFn: ({ id, headerUrl }: { id: string; headerUrl: string }) => api.put(`/templates/${id}/header-media`, { headerUrl }),
+    onSuccess: () => { toast.success("Header image saved"); queryClient.invalidateQueries({ queryKey: ["templates"] }); },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to save header image"),
+  });
+
+  function addHeaderMedia(t: Template) {
+    const url = window.prompt(`Public URL for this template's ${t.headerType.toLowerCase()} header (used on every send):`, t.headerUrl || "");
+    if (url && url.trim()) setHeaderMediaMutation.mutate({ id: t.id, headerUrl: url.trim() });
+  }
 
   const quickSendMutation = useMutation({
     mutationFn: async ({ template, phone, variables }: { template: Template; phone: string; variables: Record<string, string> }) => {
@@ -175,8 +187,19 @@ function TemplatesPageContent() {
             </div>
 
             {t.headerType !== "NONE" && (
-              <div className="bg-gray-50 rounded-lg px-3 py-2 mb-2 text-xs text-gray-500 flex items-center gap-1.5">
-                <span className="font-medium">{t.headerType}</span> header
+              <div className={`rounded-lg px-3 py-2 mb-2 text-xs flex items-center justify-between gap-1.5 ${
+                ["IMAGE", "VIDEO", "DOCUMENT"].includes(t.headerType) && !t.headerUrl
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-gray-50 text-gray-500"
+              }`}>
+                <span><span className="font-medium">{t.headerType}</span> header</span>
+                {["IMAGE", "VIDEO", "DOCUMENT"].includes(t.headerType) && (
+                  canManage ? (
+                    <button onClick={() => addHeaderMedia(t)} className="font-medium underline hover:no-underline">
+                      {t.headerUrl ? "Change" : "⚠ Set media URL"}
+                    </button>
+                  ) : !t.headerUrl && <span>⚠ No media set</span>
+                )}
               </div>
             )}
 

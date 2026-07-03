@@ -113,6 +113,7 @@ async function logOutboundMessage(ctx: ExecCtx, body: string, metaMessageId?: st
 
 async function sendText(ctx: ExecCtx, text: string): Promise<void> {
   const accessToken = decrypt(ctx.number.accessToken);
+  console.log(`[FlowEngine] Sending WhatsApp text message to ${ctx.contact.phone} via number ${ctx.number.id}`);
   const response = await axios.post(
     `${META_GRAPH_URL}/${ctx.number.phoneNumberId}/messages`,
     {
@@ -124,10 +125,12 @@ async function sendText(ctx: ExecCtx, text: string): Promise<void> {
     },
     { headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" } }
   );
+  console.log(`[FlowEngine] WhatsApp API accepted message ${response.data.messages?.[0]?.id} for ${ctx.contact.phone}`);
   await logOutboundMessage(ctx, text, response.data.messages?.[0]?.id);
 }
 
 async function runMessageNode(ctx: ExecCtx, config: MessageConfig): Promise<void> {
+  console.log(`[FlowEngine] Running message node (mode=${config.mode}) for contact ${ctx.contact.id}`);
   if (config.typingDelaySeconds) {
     await new Promise((resolve) => setTimeout(resolve, Math.min(config.typingDelaySeconds!, 30) * 1000));
   }
@@ -323,9 +326,18 @@ async function getFirstEdgeTarget(flowId: string, sourceNodeId: string): Promise
 export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Promise<void> {
   let currentNodeId = nodeId;
 
+  if (!currentNodeId) {
+    console.log(`[FlowEngine] Flow "${ctx.flow.name}" (${ctx.flow.id}) has no start node (trigger has no outgoing edge) — nothing to execute`);
+    return;
+  }
+
   while (currentNodeId) {
     const node: FlowNode | null = await prisma.flowNode.findUnique({ where: { id: currentNodeId } });
-    if (!node) break;
+    if (!node) {
+      console.log(`[FlowEngine] Node ${currentNodeId} referenced by an edge does not exist in flow "${ctx.flow.name}" — stopping execution`);
+      break;
+    }
+    console.log(`[FlowEngine] Executing node ${node.id} (type=${node.type}) in flow "${ctx.flow.name}" for contact ${ctx.contact.id}`);
 
     if (node.type === "message") {
       await runMessageNode(ctx, node.data as unknown as MessageConfig);
@@ -422,6 +434,7 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
   }
 
   // Ran off the end of the graph — flow complete
+  console.log(`[FlowEngine] Flow "${ctx.flow.name}" reached the end of the graph for contact ${ctx.contact.id} — clearing session`);
   await clearSession(ctx.contact.id, ctx.number.id);
 }
 
@@ -470,11 +483,21 @@ export async function findMatchingFlowStart(
     orderBy: { createdAt: "asc" },
   });
 
+  console.log(`[FlowEngine] Checking ${flows.length} ACTIVE flow(s) scoped to number ${numberId} (or unscoped) in workspace ${workspaceId}`);
+
   for (const flow of flows) {
     const triggerNodes = await prisma.flowNode.findMany({ where: { flowId: flow.id, type: "trigger" } });
+    if (triggerNodes.length === 0) {
+      console.log(`[FlowEngine] Flow "${flow.name}" (${flow.id}) has no trigger node — skipping`);
+      continue;
+    }
     for (const triggerNode of triggerNodes) {
       const config = triggerNode.data as unknown as TriggerConfig;
-      if (matchesTrigger(config, messageText, isFirstMessage, isReturningCustomer)) {
+      const matched = matchesTrigger(config, messageText, isFirstMessage, isReturningCustomer);
+      console.log(
+        `[FlowEngine] Flow "${flow.name}" trigger ${triggerNode.id} — matchType=${config.matchType} keywords=${JSON.stringify(config.keywords || [])} → ${matched ? "MATCH" : "no match"}`
+      );
+      if (matched) {
         const startNodeId = await getFirstEdgeTarget(flow.id, triggerNode.id);
         return { flow, startNodeId };
       }

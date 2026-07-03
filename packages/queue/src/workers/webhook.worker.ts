@@ -47,13 +47,19 @@ async function runFlowEngineForMessage(
   messageText: string | undefined,
   isNewContact: boolean
 ): Promise<void> {
+  console.log(`[FlowEngine] Message from contact ${contact.id} on number ${number.id}: "${messageText ?? "(no text)"}" (isNewContact=${isNewContact})`);
+
   const session = await prisma.flowSession.findUnique({
     where: { contactId_numberId: { contactId: contact.id, numberId: number.id } },
   });
 
   if (session?.state === "WAITING_INPUT") {
+    console.log(`[FlowEngine] Contact ${contact.id} has a session WAITING_INPUT on node ${session.nodeId} (flow ${session.flowId}) — resuming`);
     const flow = await prisma.flow.findUnique({ where: { id: session.flowId } });
-    if (!flow) return;
+    if (!flow) {
+      console.log(`[FlowEngine] Session references flow ${session.flowId} which no longer exists — dropping session`);
+      return;
+    }
     await resumeWaitingInput(
       { flow, contact, number, workspace: number.workspace, variables: (session.variables as Record<string, unknown>) || {} },
       session.nodeId,
@@ -64,11 +70,17 @@ async function runFlowEngineForMessage(
 
   if (session?.state === "WAITING_DELAY") {
     // A delayed job is already scheduled to resume this session — leave it alone.
+    console.log(`[FlowEngine] Contact ${contact.id} has a session WAITING_DELAY — ignoring inbound message until it resumes`);
     return;
   }
 
   const match = await findMatchingFlowStart(number.workspaceId, number.id, messageText, isNewContact, !isNewContact);
-  if (!match) return;
+  if (!match) {
+    console.log(`[FlowEngine] No active flow trigger matched for contact ${contact.id} on number ${number.id}`);
+    return;
+  }
+
+  console.log(`[FlowEngine] Matched flow "${match.flow.name}" (${match.flow.id}) for contact ${contact.id} — starting at node ${match.startNodeId ?? "(none — trigger has no outgoing edge)"}`);
 
   await executeFromNode(
     { flow: match.flow, contact, number, workspace: number.workspace, variables: {} },

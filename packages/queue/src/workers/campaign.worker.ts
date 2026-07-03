@@ -20,7 +20,12 @@ async function sendWhatsAppMessage(
 
   // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
   // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
-  if (header && ["IMAGE", "VIDEO", "DOCUMENT"].includes(header.type) && header.url) {
+  if (header && ["IMAGE", "VIDEO", "DOCUMENT"].includes(header.type)) {
+    if (!header.url) {
+      throw new Error(
+        `Template requires a ${header.type.toLowerCase()} header but no header media URL is set. Add one in Templates.`
+      );
+    }
     const mediaType = header.type.toLowerCase();
     components.push({
       type: "header",
