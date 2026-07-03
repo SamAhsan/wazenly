@@ -45,7 +45,11 @@ export type MetaMessageType =
   | "interactive"
   | "reaction"
   | "contacts"
-  | "sticker";
+  | "sticker"
+  | "button"
+  | "order"
+  | "system"
+  | "unsupported";
 
 export interface MetaMedia {
   id?: string;

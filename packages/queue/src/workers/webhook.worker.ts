@@ -13,6 +13,19 @@ interface WebhookJobData {
   phoneNumberId: string;
 }
 
+// Meta sends message types beyond what's in the MessageType enum (e.g. new/rare
+// ones); mapping unknowns to UNKNOWN instead of passing them through raw keeps a
+// single unrecognized type from crashing the whole webhook job.
+const KNOWN_MESSAGE_TYPES = new Set([
+  "TEXT", "IMAGE", "VIDEO", "AUDIO", "DOCUMENT", "LOCATION",
+  "CONTACTS", "TEMPLATE", "INTERACTIVE", "STICKER", "REACTION", "BUTTON",
+]);
+
+function toMessageType(metaType: string): string {
+  const upper = metaType.toUpperCase();
+  return KNOWN_MESSAGE_TYPES.has(upper) ? upper : "UNKNOWN";
+}
+
 async function upsertDailyAnalytics(
   workspaceId: string,
   numberId: string,
@@ -146,7 +159,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
               contactId: contact.id,
               phone: `+${msg.from}`,
               direction: "INBOUND",
-              type: msg.type.toUpperCase() as any,
+              type: toMessageType(msg.type) as any,
               status: "DELIVERED",
               metaMessageId: msg.id,
               body: msg.text?.body,

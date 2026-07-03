@@ -479,6 +479,8 @@ enum MessageType {
   INTERACTIVE
   STICKER
   REACTION
+  BUTTON
+  UNKNOWN
 }
 
 enum MessageDirection {
