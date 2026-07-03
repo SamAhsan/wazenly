@@ -1,16 +1,68 @@
 import { Router } from "express";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
+import ExcelJS from "exceljs";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { normalizePhone, isValidPhone } from "@wazenly/shared";
 import { contactImporterQueue } from "@wazenly/queue";
 
+const MAX_IMPORT_ROWS = 10000;
+
+// Reads CSV or XLSX into a uniform { columns, rows } shape, keeping original header
+// text (not assuming any fixed column name/order) so the caller can build a mapping UI.
+async function parseSpreadsheet(file: Express.Multer.File): Promise<{ columns: string[]; rows: Record<string, string>[]; truncated: boolean }> {
+  const isExcel = /\.(xlsx)$/i.test(file.originalname) || file.mimetype.includes("spreadsheet");
+
+  if (isExcel) {
+    const workbook = new ExcelJS.Workbook();
+    // ExcelJS's bundled type declares a Buffer shape from a different @types/node
+    // version than this monorepo's — a type-level mismatch only, valid at runtime.
+    await workbook.xlsx.load(Buffer.from(file.buffer) as any);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return { columns: [], rows: [], truncated: false };
+
+    const headerRow = sheet.getRow(1);
+    const columns: string[] = [];
+    headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      columns[colNumber - 1] = String(cell.value ?? "").trim();
+    });
+
+    const rows: Record<string, string>[] = [];
+    const totalDataRows = sheet.rowCount - 1;
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      if (rows.length >= MAX_IMPORT_ROWS) return;
+      const record: Record<string, string> = {};
+      let hasValue = false;
+      columns.forEach((col, idx) => {
+        if (!col) return;
+        const cell = row.getCell(idx + 1);
+        const value = cell.value == null ? "" : String(cell.text ?? cell.value).trim();
+        record[col] = value;
+        if (value) hasValue = true;
+      });
+      if (hasValue) rows.push(record);
+    });
+
+    return { columns: columns.filter(Boolean), rows, truncated: totalDataRows > MAX_IMPORT_ROWS };
+  }
+
+  const records = parse(file.buffer, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+  const columns = records.length > 0 ? Object.keys(records[0]) : [];
+  const nonBlankRows = records.filter((r) => Object.values(r).some((v) => v && v.trim()));
+  return {
+    columns,
+    rows: nonBlankRows.slice(0, MAX_IMPORT_ROWS),
+    truncated: nonBlankRows.length > MAX_IMPORT_ROWS,
+  };
+}
+
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth, requireWorkspace);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const contactSchema = z.object({
   name: z.string().min(1),
@@ -111,28 +163,82 @@ contactsRouter.delete("/:id", requireRole("AGENT"), async (req: AuthRequest, res
   }
 });
 
-// POST /api/contacts/import
-contactsRouter.post("/import", upload.single("file"), requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+// POST /api/contacts/import/parse — reads the file and returns its columns + rows so the
+// frontend can show a mapping UI. Does not write anything to the database.
+contactsRouter.post("/import/parse", upload.single("file"), requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "CSV file required" });
-    const { listId, deduplicate = "true" } = req.body as { listId?: string; deduplicate?: string };
+    if (!req.file) return res.status(400).json({ error: "File required" });
+    const { columns, rows, truncated } = await parseSpreadsheet(req.file);
+    if (columns.length === 0) return res.status(400).json({ error: "Couldn't find a header row in this file" });
+    if (rows.length === 0) return res.status(400).json({ error: "File has no data rows" });
 
-    const records = parse(req.file.buffer, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    }) as Record<string, string>[];
+    res.json({ columns, rows, totalRows: rows.length, truncated });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    if (!records.length) return res.status(400).json({ error: "CSV is empty" });
+const importMappingSchema = z.object({
+  mapping: z.object({
+    name: z.string().optional(),
+    phone: z.string(),
+    email: z.string().optional(),
+    tags: z.string().optional(),
+  }),
+  rows: z.array(z.record(z.string())).min(1).max(MAX_IMPORT_ROWS),
+  listId: z.string().optional(),
+  listName: z.string().optional(),
+  deduplicate: z.boolean().default(true),
+});
+
+// POST /api/contacts/import — takes the mapped column choices + previously parsed rows
+// (from /import/parse) and queues the actual import.
+contactsRouter.post("/import", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+  try {
+    const body = importMappingSchema.parse(req.body);
+
+    let listId = body.listId;
+    if (!listId && body.listName?.trim()) {
+      const list = await prisma.contactList.create({
+        data: { workspaceId: req.workspaceId!, name: body.listName.trim() },
+      });
+      listId = list.id;
+    }
+
+    const { name: nameCol, phone: phoneCol, email: emailCol, tags: tagsCol } = body.mapping;
+    const contacts = body.rows.map((row) => ({
+      name: nameCol ? row[nameCol] || "" : "",
+      phone: row[phoneCol] || "",
+      email: emailCol ? row[emailCol] || undefined : undefined,
+      tags: tagsCol && row[tagsCol] ? row[tagsCol].split(/[,;]/).map((t) => t.trim()).filter(Boolean) : undefined,
+    }));
 
     const job = await contactImporterQueue.add("import-contacts", {
       workspaceId: req.workspaceId!,
       listId,
-      contacts: records,
-      deduplicate: deduplicate === "true",
+      contacts,
+      deduplicate: body.deduplicate,
     });
 
-    res.json({ jobId: job.id, totalRows: records.length, message: "Import started" });
+    res.json({ jobId: job.id, totalRows: contacts.length, message: "Import started" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/contacts/import/:jobId/status
+contactsRouter.get("/import/:jobId/status", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+  try {
+    const job = await contactImporterQueue.getJob(req.params.jobId);
+    if (!job) return res.status(404).json({ error: "Import job not found" });
+
+    const state = await job.getState();
+    res.json({
+      state,
+      progress: job.progress,
+      result: state === "completed" ? job.returnvalue : null,
+      failedReason: state === "failed" ? job.failedReason : null,
+    });
   } catch (err) {
     next(err);
   }

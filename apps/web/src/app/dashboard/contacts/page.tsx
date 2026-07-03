@@ -1,14 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, FileText, AlertCircle, Send } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, Send } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { ImportWizard } from "@/components/contacts/ImportWizard";
 
 type Contact = {
   id: string; name: string; email?: string; phone: string; tags: string[];
@@ -18,22 +19,10 @@ type Contact = {
 type ContactList = { id: string; name: string; description?: string; _count?: { members: number } };
 type Template = { id: string; name: string; body: string; category: string; language: string };
 
-function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-().]/g, "");
-  if (!p.startsWith("+")) p = "+" + p;
-  return p;
-}
-
-function isValidPhone(p: string): boolean {
-  return /^\+\d{7,15}$/.test(p);
-}
-
 function getBodyVars(body: string): number[] {
   const matches = body.match(/\{\{(\d+)\}\}/g) || [];
   return Array.from(new Set(matches.map((m) => parseInt(m.replace(/[{}]/g, ""))))).sort((a, b) => a - b);
 }
-
-type CsvRow = Record<string, string>;
 
 function ContactsPageContent() {
   const [tab, setTab] = useState<"contacts" | "lists">("contacts");
@@ -45,12 +34,7 @@ function ContactsPageContent() {
   const [showAddToList, setShowAddToList] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
 
-  // CSV import modal state
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
-  const [csvErrors, setCsvErrors] = useState<string[]>([]);
-  const [showCsvModal, setShowCsvModal] = useState(false);
-  const [csvListName, setCsvListName] = useState("");
+  const [showImportWizard, setShowImportWizard] = useState(false);
 
   // Send template state
   const [sendContact, setSendContact] = useState<Contact | null>(null);
@@ -58,7 +42,6 @@ function ContactsPageContent() {
   const [sendVars, setSendVars] = useState<Record<string, string>>({});
 
   const { selectedNumberId } = useSelectedNumber();
-  const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -100,26 +83,6 @@ function ContactsPageContent() {
   const deleteContact = useMutation({
     mutationFn: (id: string) => api.delete(`/contacts/${id}`),
     onSuccess: () => { toast.success("Contact deleted"); qc.invalidateQueries({ queryKey: ["contacts"] }); },
-  });
-
-  const importContacts = useMutation({
-    mutationFn: async ({ file, listId }: { file: File; listId: string }) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("deduplicate", "true");
-      form.append("listId", listId);
-      return api.post("/contacts/import", form, { headers: { "Content-Type": "multipart/form-data" } });
-    },
-    onSuccess: (r) => {
-      toast.success(`Import started — ${r.data.totalRows} rows queued`);
-      qc.invalidateQueries({ queryKey: ["contacts"] });
-      qc.invalidateQueries({ queryKey: ["contact-lists"] });
-      setShowCsvModal(false);
-      setCsvFile(null);
-      setCsvRows([]);
-      setCsvListName("");
-    },
-    onError: () => toast.error("Import failed"),
   });
 
   const createList = useMutation({
@@ -168,53 +131,6 @@ function ContactsPageContent() {
   const contacts: Contact[] = data?.data || [];
   const listContactsData: Contact[] = listContacts?.data || [];
 
-  function handleCsvFileSelect(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) { toast.error("CSV file is empty or has no data rows"); return; }
-
-      const headers = lines[0].split(",").map((h) => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
-      const rows: CsvRow[] = [];
-      const errs: string[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const vals = lines[i].split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
-        const row: CsvRow = {};
-        headers.forEach((h, idx) => { row[h] = vals[idx] || ""; });
-
-        const rawPhone = row.phone || row.phonenumber || row["phone number"] || row.mobile || "";
-        if (!rawPhone) { errs.push(`Row ${i}: missing phone number — skipped`); continue; }
-
-        const phone = normalizePhone(rawPhone);
-        if (!isValidPhone(phone)) { errs.push(`Row ${i}: invalid phone "${rawPhone}" — will be skipped`); continue; }
-
-        row._phone_normalized = phone;
-        if (!row.name) row.name = phone;
-        rows.push(row);
-      }
-
-      setCsvRows(rows);
-      setCsvErrors(errs);
-      setCsvFile(file);
-      setCsvListName(file.name.replace(/\.csv$/i, "").replace(/[_-]/g, " "));
-      setShowCsvModal(true);
-    };
-    reader.readAsText(file);
-  }
-
-  async function confirmCsvImport() {
-    if (!csvListName.trim()) { toast.error("Please enter a list name"); return; }
-    if (!csvFile) return;
-    try {
-      const listRes = await api.post("/contacts/lists", { name: csvListName.trim() });
-      importContacts.mutate({ file: csvFile, listId: listRes.data.id });
-    } catch {
-      toast.error("Failed to create list");
-    }
-  }
-
   function openSendModal(c: Contact) {
     if (!selectedNumberId) { toast.error("Select a WhatsApp number from the top bar first"); return; }
     setSendContact(c);
@@ -245,23 +161,11 @@ function ContactsPageContent() {
           <p className="text-gray-500 text-sm mt-1">{data?.total || 0} total contacts · {lists.length} lists</p>
         </div>
         <div className="flex gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.[0]) {
-                handleCsvFileSelect(e.target.files[0]);
-                e.target.value = "";
-              }
-            }}
-          />
           <button
-            onClick={() => fileRef.current?.click()}
+            onClick={() => setShowImportWizard(true)}
             className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
           >
-            <Upload className="w-4 h-4" /> Import CSV
+            <Upload className="w-4 h-4" /> Import
           </button>
           {tab === "contacts" && (
             <button
@@ -584,106 +488,15 @@ function ContactsPageContent() {
         </div>
       )}
 
-      {/* ── CSV IMPORT MODAL ── */}
-      {showCsvModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="font-bold text-gray-900">Import Contacts</h2>
-                  <p className="text-xs text-gray-400">{csvRows.length} valid contacts found</p>
-                </div>
-              </div>
-              <button onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvRows([]); }}>
-                <X className="w-4 h-4 text-gray-400" />
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">List Name *</label>
-              <input
-                value={csvListName}
-                onChange={(e) => setCsvListName(e.target.value)}
-                placeholder="e.g. January Leads"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <p className="text-xs text-gray-400 mt-0.5">All contacts from this CSV will be added to this list.</p>
-            </div>
-
-            {csvErrors.length > 0 && (
-              <div className="mb-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                  <p className="text-xs font-semibold text-amber-800">{csvErrors.length} row{csvErrors.length !== 1 ? "s" : ""} will be skipped</p>
-                </div>
-                <div className="max-h-20 overflow-y-auto space-y-0.5">
-                  {csvErrors.map((e, i) => (
-                    <p key={i} className="text-xs text-amber-700">{e}</p>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {csvRows.length > 0 && (
-              <div className="flex-1 overflow-hidden">
-                <p className="text-xs font-medium text-gray-500 mb-2">Preview (first 5 rows)</p>
-                <div className="overflow-auto max-h-52 rounded-lg border border-gray-100">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="text-left px-3 py-2 font-medium text-gray-500">Name</th>
-                        <th className="text-left px-3 py-2 font-medium text-gray-500">Phone (Normalized)</th>
-                        <th className="text-left px-3 py-2 font-medium text-gray-500">Email</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {csvRows.slice(0, 5).map((row, i) => (
-                        <tr key={i} className="border-b border-gray-50">
-                          <td className="px-3 py-2 text-gray-800">{row.name || "—"}</td>
-                          <td className="px-3 py-2 font-mono text-gray-700">{row._phone_normalized || row.phone}</td>
-                          <td className="px-3 py-2 text-gray-500">{row.email || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {csvRows.length > 5 && (
-                    <p className="px-3 py-2 text-xs text-gray-400 bg-gray-50">...and {csvRows.length - 5} more</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {csvRows.length === 0 && (
-              <div className="flex-1 flex items-center justify-center py-8">
-                <div className="text-center">
-                  <AlertCircle className="w-10 h-10 text-red-300 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-gray-700">No valid contacts found</p>
-                  <p className="text-xs text-gray-400 mt-1">Make sure your CSV has a "phone" column with valid numbers including country code.</p>
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100">
-              <button
-                onClick={() => { setShowCsvModal(false); setCsvFile(null); setCsvRows([]); }}
-                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={csvRows.length === 0 || !csvListName.trim() || importContacts.isPending}
-                onClick={confirmCsvImport}
-                className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium disabled:opacity-50"
-              >
-                {importContacts.isPending ? "Importing..." : `Import ${csvRows.length} Contact${csvRows.length !== 1 ? "s" : ""}`}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── IMPORT WIZARD ── */}
+      {showImportWizard && (
+        <ImportWizard
+          onClose={() => setShowImportWizard(false)}
+          onImported={() => {
+            qc.invalidateQueries({ queryKey: ["contacts"] });
+            qc.invalidateQueries({ queryKey: ["contact-lists"] });
+          }}
+        />
       )}
 
       {/* ── ADD CONTACT MODAL ── */}

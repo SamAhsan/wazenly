@@ -17,20 +17,29 @@ interface ContactImportJobData {
   deduplicate: boolean;
 }
 
-async function importContacts(job: Job<ContactImportJobData>): Promise<void> {
+interface ImportSummary {
+  total: number;
+  imported: number;
+  duplicates: number;
+  invalidNumbers: number;
+  otherErrors: number;
+}
+
+async function importContacts(job: Job<ContactImportJobData>): Promise<ImportSummary> {
   const { workspaceId, listId, contacts, deduplicate } = job.data;
 
   let imported = 0;
-  let skipped = 0;
-  let failed = 0;
+  let duplicates = 0;
+  let invalidNumbers = 0;
+  let otherErrors = 0;
 
   const phones = new Set<string>();
 
   for (const row of contacts) {
     try {
       const phone = normalizePhone(row.phone);
-      if (!isValidPhone(phone)) { failed++; continue; }
-      if (deduplicate && phones.has(phone)) { skipped++; continue; }
+      if (!isValidPhone(phone)) { invalidNumbers++; continue; }
+      if (deduplicate && phones.has(phone)) { duplicates++; continue; }
       phones.add(phone);
 
       const { name, email, tags, ...rest } = row;
@@ -64,17 +73,18 @@ async function importContacts(job: Job<ContactImportJobData>): Promise<void> {
 
       imported++;
     } catch {
-      failed++;
+      otherErrors++;
     }
 
-    await job.updateProgress(Math.round(((imported + skipped + failed) / contacts.length) * 100));
+    await job.updateProgress(Math.round(((imported + duplicates + invalidNumbers + otherErrors) / contacts.length) * 100));
   }
 
-  console.log(`[ContactImporter] Workspace ${workspaceId}: imported=${imported} skipped=${skipped} failed=${failed}`);
+  console.log(`[ContactImporter] Workspace ${workspaceId}: imported=${imported} duplicates=${duplicates} invalidNumbers=${invalidNumbers} otherErrors=${otherErrors}`);
+  return { total: contacts.length, imported, duplicates, invalidNumbers, otherErrors };
 }
 
 export function createContactImporterWorker() {
-  const worker = new Worker<ContactImportJobData>(
+  const worker = new Worker<ContactImportJobData, ImportSummary>(
     QUEUE_NAMES.CONTACT_IMPORTER,
     importContacts,
     { connection: redisConnection, concurrency: 2 }
