@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -63,15 +63,22 @@ function TemplatesPageContent() {
   });
 
   const setHeaderMediaMutation = useMutation({
-    mutationFn: ({ id, headerUrl }: { id: string; headerUrl: string }) => api.put(`/templates/${id}/header-media`, { headerUrl }),
-    onSuccess: () => { toast.success("Header image saved"); queryClient.invalidateQueries({ queryKey: ["templates"] }); },
+    mutationFn: ({ id, file }: { id: string; file: File }) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api.put(`/templates/${id}/header-media`, form, { headers: { "Content-Type": "multipart/form-data" } });
+    },
+    onSuccess: () => { toast.success("Header media saved"); queryClient.invalidateQueries({ queryKey: ["templates"] }); },
     onError: (e: { response?: { data?: { error?: string } } }) =>
-      toast.error(e.response?.data?.error || "Failed to save header image"),
+      toast.error(e.response?.data?.error || "Failed to save header media"),
   });
 
+  const headerMediaFileRef = useRef<HTMLInputElement>(null);
+  const [headerMediaTargetId, setHeaderMediaTargetId] = useState<string | null>(null);
+
   function addHeaderMedia(t: Template) {
-    const url = window.prompt(`Public URL for this template's ${t.headerType.toLowerCase()} header (used on every send):`, t.headerUrl || "");
-    if (url && url.trim()) setHeaderMediaMutation.mutate({ id: t.id, headerUrl: url.trim() });
+    setHeaderMediaTargetId(t.id);
+    headerMediaFileRef.current?.click();
   }
 
   const quickSendMutation = useMutation({
@@ -119,6 +126,17 @@ function TemplatesPageContent() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
+      <input
+        ref={headerMediaFileRef}
+        type="file"
+        accept="image/*,video/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && headerMediaTargetId) setHeaderMediaMutation.mutate({ id: headerMediaTargetId, file });
+          e.target.value = "";
+        }}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Templates</h1>
@@ -195,8 +213,8 @@ function TemplatesPageContent() {
                 <span><span className="font-medium">{t.headerType}</span> header</span>
                 {["IMAGE", "VIDEO", "DOCUMENT"].includes(t.headerType) && (
                   canManage ? (
-                    <button onClick={() => addHeaderMedia(t)} className="font-medium underline hover:no-underline">
-                      {t.headerUrl ? "Change" : "⚠ Set media URL"}
+                    <button onClick={() => addHeaderMedia(t)} disabled={setHeaderMediaMutation.isPending} className="font-medium underline hover:no-underline disabled:opacity-50">
+                      {setHeaderMediaMutation.isPending && headerMediaTargetId === t.id ? "Uploading..." : t.headerUrl ? "Change" : "⚠ Upload media"}
                     </button>
                   ) : !t.headerUrl && <span>⚠ No media set</span>
                 )}

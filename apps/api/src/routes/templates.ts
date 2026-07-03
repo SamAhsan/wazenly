@@ -219,20 +219,31 @@ templatesRouter.get("/:id", requireRole("AGENT"), async (req: AuthRequest, res, 
   }
 });
 
-// PUT /api/templates/:id/header-media — set the send-time header image/video/document URL.
+// PUT /api/templates/:id/header-media — set the send-time header image/video/document.
 // Meta's template sync API never returns a reusable media reference (only an opaque,
 // single-use upload handle from template creation), so for templates approved directly
 // in Meta and synced in, this has to be supplied manually before the template can be sent.
-templatesRouter.put("/:id/header-media", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+// Accepts either a file upload (stored on our own /uploads, no Meta round-trip needed —
+// sending only needs a public link) or a headerUrl if the caller already hosts one.
+templatesRouter.put("/:id/header-media", upload.single("file"), requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
-    const { headerUrl } = z.object({ headerUrl: z.string().url() }).parse(req.body);
-
     const template = await prisma.template.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
     });
     if (!template) return res.status(404).json({ error: "Template not found" });
     if (!["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType)) {
       return res.status(400).json({ error: "This template's header type doesn't use a media URL" });
+    }
+
+    let headerUrl: string;
+    if (req.file) {
+      const baseUrl = process.env.WEBHOOK_BASE_URL;
+      if (!baseUrl) return res.status(500).json({ error: "WEBHOOK_BASE_URL is not configured on the server" });
+      headerUrl = `${baseUrl}/uploads/${req.file.filename}`;
+    } else {
+      const parsed = z.object({ headerUrl: z.string().url() }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Upload a file or provide a valid headerUrl" });
+      headerUrl = parsed.data.headerUrl;
     }
 
     const updated = await prisma.template.update({
