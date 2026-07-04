@@ -24,6 +24,7 @@ export default function InvitePage() {
   const [preview, setPreview] = useState<InvitationPreview | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -33,7 +34,10 @@ export default function InvitePage() {
   }, [token]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !preview || preview.expired || accepting) return;
+    // acceptError guards against retrying forever: NextAuth's SessionProvider refetches
+    // the session on window focus, which hands us a new `session` object on every
+    // focus and would otherwise re-fire this effect and re-attempt a doomed request.
+    if (status !== "authenticated" || !preview || preview.expired || accepting || acceptError) return;
     if (session?.user?.email?.toLowerCase() !== preview.email.toLowerCase()) return;
 
     setAccepting(true);
@@ -44,11 +48,11 @@ export default function InvitePage() {
         toast.success(`You've joined ${preview.workspaceName}`);
         router.push("/dashboard");
       })
-      .catch(() => {
-        toast.error("Failed to accept invitation");
+      .catch((err) => {
+        setAcceptError(err.response?.data?.error || "Failed to accept invitation.");
         setAccepting(false);
       });
-  }, [status, session, preview, token, accepting, router]);
+  }, [status, session, preview, token, accepting, acceptError, router]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
@@ -76,11 +80,23 @@ export default function InvitePage() {
                 {preview.inviterName} invited you to join <strong>{preview.workspaceName}</strong> as a <strong>{preview.role}</strong>.
               </p>
 
-              {status === "authenticated" && session?.user?.email?.toLowerCase() === preview.email.toLowerCase() && (
+              {status === "authenticated" && acceptError && (
+                <div className="space-y-3">
+                  <p className="text-red-600 text-sm">{acceptError}</p>
+                  <Link
+                    href={`/auth/login?invite=${token}`}
+                    className="block w-full bg-primary text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-primary-600"
+                  >
+                    Log in again
+                  </Link>
+                </div>
+              )}
+
+              {status === "authenticated" && !acceptError && session?.user?.email?.toLowerCase() === preview.email.toLowerCase() && (
                 <p className="text-gray-500 text-sm">{accepting ? "Joining workspace…" : "Signing you in…"}</p>
               )}
 
-              {status === "authenticated" && session?.user?.email?.toLowerCase() !== preview.email.toLowerCase() && (
+              {status === "authenticated" && !acceptError && session?.user?.email?.toLowerCase() !== preview.email.toLowerCase() && (
                 <p className="text-amber-600 text-sm">
                   You&apos;re signed in as {session?.user?.email}, but this invite was sent to {preview.email}. Sign out and try again.
                 </p>

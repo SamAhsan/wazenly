@@ -43,7 +43,13 @@ invitationsRouter.post("/:token/accept", requireAuth, async (req: AuthRequest, r
     }
 
     const user = await prisma.user.findUnique({ where: { id: req.userId! } });
-    if (!user || user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+    if (!user) {
+      // A JWT can still verify (requireAuth passes) after its underlying user row is
+      // gone -- e.g. the account was deleted directly in the DB. Send 401 so the
+      // frontend's existing interceptor redirects to login instead of retrying forever.
+      return res.status(401).json({ error: "Your session is no longer valid. Please log in again." });
+    }
+    if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
       return res.status(403).json({ error: "This invitation was sent to a different email address" });
     }
 
