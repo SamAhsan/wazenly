@@ -26,6 +26,21 @@ function toMessageType(metaType: string): string {
   return KNOWN_MESSAGE_TYPES.has(upper) ? upper : "UNKNOWN";
 }
 
+// A tapped quick-reply or interactive button carries no msg.text — but the button's own
+// label is exactly what the user "said" by tapping it, so flow keyword triggers (and
+// message previews) should be able to match against it the same as typed text.
+function extractMessageText(msg: {
+  text?: { body: string };
+  button?: { text: string };
+  interactive?: { type: string; button_reply?: { title: string }; list_reply?: { title: string } };
+}): string | undefined {
+  if (msg.text?.body) return msg.text.body;
+  if (msg.button?.text) return msg.button.text;
+  if (msg.interactive?.button_reply?.title) return msg.interactive.button_reply.title;
+  if (msg.interactive?.list_reply?.title) return msg.interactive.list_reply.title;
+  return undefined;
+}
+
 async function upsertDailyAnalytics(
   workspaceId: string,
   numberId: string,
@@ -175,7 +190,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
               type: toMessageType(msg.type) as any,
               status: "DELIVERED",
               metaMessageId: msg.id,
-              body: msg.text?.body,
+              body: extractMessageText(msg),
               timestamp: new Date(Number(msg.timestamp) * 1000),
               raw: msg as any,
             },
@@ -192,14 +207,14 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
 
           // Flow Builder execution
           try {
-            await runFlowEngineForMessage(number, contact, msg.text?.body, isNewContact);
+            await runFlowEngineForMessage(number, contact, extractMessageText(msg), isNewContact);
           } catch (err) {
             console.error(`[WebhookWorker] Flow engine error for contact ${contact.id}:`, (err as Error).message);
           }
 
           // Notify: new incoming message — the assigned agent, or (for a brand-new contact only) the whole team
           try {
-            const preview = msg.text?.body?.slice(0, 80) || `[${msg.type}]`;
+            const preview = extractMessageText(msg)?.slice(0, 80) || `[${msg.type}]`;
             const recipients = conversation.assignedUserId
               ? [conversation.assignedUserId]
               : isNewContact
