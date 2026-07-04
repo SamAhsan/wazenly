@@ -17,6 +17,16 @@ conversationsRouter.get("/", async (req: AuthRequest, res, next) => {
     if (numberId) where.numberId = numberId;
     if (assignedToMe === "true") where.assignedUserId = req.userId;
     if (q) where.OR = [{ contactName: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }];
+    // A campaign/quick-send message is recorded as soon as Meta accepts the API call,
+    // before we know whether the number even exists on WhatsApp -- so a conversation
+    // with no real customer activity and nothing but a failed send is just noise, not
+    // a contact worth showing. Anything the contact ever actually messaged in on stays.
+    where.NOT = {
+      AND: [
+        { messages: { none: { direction: "INBOUND" } } },
+        { messages: { every: { status: "FAILED" } } },
+      ],
+    };
 
     const [conversations, total] = await Promise.all([
       prisma.conversation.findMany({

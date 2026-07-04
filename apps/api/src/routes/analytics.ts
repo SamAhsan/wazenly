@@ -38,11 +38,15 @@ analyticsRouter.get("/overview", async (req: AuthRequest, res, next) => {
     const delivered = current._sum.delivered || 0;
     const read = current._sum.read || 0;
     const failed = current._sum.failed || 0;
+    // Rates are out of every message actually attempted (sent + failed), not just the
+    // ones that succeeded — otherwise a campaign that mostly failed can still show a
+    // 100% delivery rate, since failures would have shrunk out of the denominator.
+    const attempted = sent + failed;
 
     res.json({
       messagesSent: sent,
-      deliveryRate: sent > 0 ? Math.round((delivered / sent) * 100) : 0,
-      readRate: delivered > 0 ? Math.round((read / delivered) * 100) : 0,
+      deliveryRate: attempted > 0 ? Math.round((delivered / attempted) * 100) : 0,
+      readRate: attempted > 0 ? Math.round((read / attempted) * 100) : 0,
       failedMessages: failed,
       activeCampaigns,
       newContacts,
@@ -93,8 +97,10 @@ analyticsRouter.get("/campaigns", async (req: AuthRequest, res, next) => {
 
     const enriched = campaigns.map((c) => ({
       ...c,
-      deliveryRate: c.sentCount > 0 ? Math.round((c.deliveredCount / c.sentCount) * 100) : 0,
-      readRate: c.deliveredCount > 0 ? Math.round((c.readCount / c.deliveredCount) * 100) : 0,
+      // Out of every recipient the campaign targeted, not just the ones that sent
+      // successfully — matches the campaign detail page's stat cards.
+      deliveryRate: c.totalRecipients > 0 ? Math.round((c.deliveredCount / c.totalRecipients) * 100) : 0,
+      readRate: c.totalRecipients > 0 ? Math.round((c.readCount / c.totalRecipients) * 100) : 0,
     }));
 
     res.json(enriched);

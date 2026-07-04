@@ -80,8 +80,8 @@ function CampaignDetailPageContent() {
         {[
           { label: "Total", value: formatNumber(campaign.totalRecipients), icon: Users, color: "text-gray-600" },
           { label: "Sent", value: formatNumber(campaign.sentCount), icon: Send, color: "text-blue-600" },
-          { label: "Delivered", value: pct(campaign.deliveredCount, campaign.sentCount), icon: CheckCircle2, color: "text-purple-600" },
-          { label: "Read", value: pct(campaign.readCount, campaign.deliveredCount), icon: Eye, color: "text-primary" },
+          { label: "Delivered", value: pct(campaign.deliveredCount, campaign.totalRecipients), icon: CheckCircle2, color: "text-purple-600" },
+          { label: "Read", value: pct(campaign.readCount, campaign.totalRecipients), icon: Eye, color: "text-primary" },
           { label: "Failed", value: formatNumber(campaign.failedCount), icon: AlertCircle, color: "text-red-600" },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm text-center">

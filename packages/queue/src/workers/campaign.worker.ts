@@ -271,6 +271,10 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
         },
       });
       failedCount++;
+      // Send-time rejections (e.g. "message undeliverable") never reached the webhook's
+      // status handler, so daily analytics undercounted failures — only delivery-time
+      // failures reported later by Meta were ever recorded.
+      await upsertDailyAnalytics(workspaceId, campaign.number.id, "failed").catch(() => {});
     }
   }
 
