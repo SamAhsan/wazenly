@@ -209,14 +209,21 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
       // and give the status-update handler in webhook.worker.ts a Message row to find —
       // it already looks one up by metaMessageId, but had nothing to match without this.
       try {
-        const contact = cc.contactId ? await prisma.contact.findUnique({ where: { id: cc.contactId }, select: { name: true } }) : null;
+        // cc.contactId is only set when the campaign was built by picking from Contacts —
+        // a campaign sent to raw phone numbers leaves it null even if a saved Contact
+        // with that exact phone already exists, so fall back to a phone lookup too.
+        const contact = cc.contactId
+          ? await prisma.contact.findUnique({ where: { id: cc.contactId }, select: { id: true, name: true } })
+          : await prisma.contact.findFirst({ where: { workspaceId, phone: cc.phone }, select: { id: true, name: true } });
+        const contactId = cc.contactId || contact?.id;
+
         const conversation = await prisma.conversation.upsert({
           where: { workspaceId_numberId_phone: { workspaceId, numberId: campaign.number.id, phone: cc.phone } },
-          update: { lastMessageAt: new Date(), contactName: contact?.name || undefined },
+          update: { lastMessageAt: new Date(), contactId: contactId || undefined, contactName: contact?.name || undefined },
           create: {
             workspaceId,
             numberId: campaign.number.id,
-            contactId: cc.contactId,
+            contactId,
             phone: cc.phone,
             contactName: contact?.name || cc.phone,
             lastMessageAt: new Date(),
@@ -228,7 +235,7 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
             workspaceId,
             conversationId: conversation.id,
             numberId: campaign.number.id,
-            contactId: cc.contactId,
+            contactId,
             phone: cc.phone,
             direction: "OUTBOUND",
             type: "TEMPLATE",

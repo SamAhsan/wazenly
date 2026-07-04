@@ -253,11 +253,11 @@ export default function InboxPage() {
 
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-9 h-9 bg-primary/10 rounded-full flex items-center justify-center text-primary text-sm font-semibold flex-shrink-0">
-                {getInitials(conversation?.contactName || conversation?.phone || "?")}
+                {getInitials(conversation?.contact?.name || conversation?.contactName || conversation?.phone || "?")}
               </div>
               <div className="min-w-0">
                 <p className="font-semibold text-gray-900 text-sm truncate">
-                  {conversation?.contactName || conversation?.phone}
+                  {conversation?.contact?.name || conversation?.contactName || conversation?.phone}
                 </p>
                 <p className="text-xs text-gray-400 font-mono truncate">{conversation?.phone}</p>
               </div>

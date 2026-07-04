@@ -148,6 +148,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             update: {
               lastMessageAt: new Date(Number(msg.timestamp) * 1000),
               unreadCount: { increment: 1 },
+              contactId: contact.id,
               contactName: contactName || undefined,
             },
             create: {
