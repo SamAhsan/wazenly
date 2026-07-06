@@ -156,6 +156,7 @@ apiV1Router.get("/campaigns/:id", async (req: AuthRequest, res, next) => {
 apiV1Router.post("/contacts", async (req: AuthRequest, res, next) => {
   try {
     const body = z.object({
+      numberId: z.string(),
       name: z.string(),
       phone: z.string(),
       email: z.string().email().optional(),
@@ -164,7 +165,7 @@ apiV1Router.post("/contacts", async (req: AuthRequest, res, next) => {
 
     const phone = normalizePhone(body.phone);
     const contact = await prisma.contact.upsert({
-      where: { workspaceId_phone: { workspaceId: req.workspaceId!, phone } },
+      where: { workspaceId_numberId_phone: { workspaceId: req.workspaceId!, numberId: body.numberId, phone } },
       create: { workspaceId: req.workspaceId!, ...body, phone },
       update: { name: body.name, email: body.email },
     });
@@ -177,15 +178,17 @@ apiV1Router.post("/contacts", async (req: AuthRequest, res, next) => {
 // GET /api/v1/contacts
 apiV1Router.get("/contacts", async (req: AuthRequest, res, next) => {
   try {
-    const { page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { page = "1", limit = "50", numberId } = req.query as Record<string, string>;
+    const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
+    if (numberId) where.numberId = numberId;
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
-        where: { workspaceId: req.workspaceId! },
+        where,
         skip: (Number(page) - 1) * Number(limit),
         take: Number(limit),
         select: { id: true, name: true, phone: true, email: true, tags: true, optedOut: true },
       }),
-      prisma.contact.count({ where: { workspaceId: req.workspaceId! } }),
+      prisma.contact.count({ where }),
     ]);
     res.json({ data: contacts, total, page: Number(page) });
   } catch (err) {

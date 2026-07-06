@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil } from "lucide-react";
+import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
@@ -51,6 +51,13 @@ function NumbersPageContent() {
     queryKey: ["numbers"],
     queryFn: () => api.get("/numbers").then((r) => r.data),
   });
+
+  const { data: webhookInfo } = useQuery({
+    queryKey: ["webhook-info"],
+    queryFn: () => api.get("/settings/webhook-info").then((r) => r.data),
+  });
+
+  const copy = (value: string) => { navigator.clipboard.writeText(value); toast.success("Copied!"); };
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<NumberForm>({
     resolver: zodResolver(numberSchema),
@@ -102,6 +109,37 @@ function NumbersPageContent() {
           <Plus className="w-4 h-4" /> Connect Number
         </button>
       </div>
+
+      {/* Webhook info — same URL/token for every number, paste into Meta's App Dashboard */}
+      {webhookInfo && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Webhook className="w-4 h-4 text-gray-400" /> Webhook config for Meta (same for every number)
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Callback URL</label>
+              <div className="flex items-center gap-1.5">
+                <input readOnly value={webhookInfo.webhookUrl} className="flex-1 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700" />
+                <button onClick={() => copy(webhookInfo.webhookUrl)} className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg" title="Copy">
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Verify Token</label>
+              <div className="flex items-center gap-1.5">
+                <input readOnly value={webhookInfo.verifyToken || "Not configured"} className="flex-1 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-mono text-gray-700" />
+                {webhookInfo.verifyToken && (
+                  <button onClick={() => copy(webhookInfo.verifyToken)} className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg" title="Copy">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Connect form modal */}
       {showForm && (

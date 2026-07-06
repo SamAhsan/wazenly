@@ -29,7 +29,7 @@ analyticsRouter.get("/overview", async (req: AuthRequest, res, next) => {
       }),
       prisma.campaign.count({ where: { workspaceId: req.workspaceId!, status: "RUNNING", ...(numberId ? { numberId } : {}) } }),
       prisma.contact.count({
-        where: { workspaceId: req.workspaceId!, createdAt: { gte: startDate, lte: endDate } },
+        where: { workspaceId: req.workspaceId!, createdAt: { gte: startDate, lte: endDate }, ...(numberId ? { numberId } : {}) },
       }),
     ]);
 

@@ -48,6 +48,21 @@ settingsRouter.put("/workspace", requireRole("ADMIN"), async (req: AuthRequest, 
   }
 });
 
+// GET /api/settings/webhook-info — the callback URL/verify token to paste into Meta's
+// App Dashboard. Every number shares the same one: the webhook receiver only serves a
+// single global route (see routes/webhooks.ts), validated against one env-var token,
+// regardless of which number the event is actually for.
+settingsRouter.get("/webhook-info", requireRole("ADMIN"), async (_req: AuthRequest, res, next) => {
+  try {
+    res.json({
+      webhookUrl: `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta`,
+      verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/settings/members — MANAGER+ (not just ADMIN+) because the flow builder's
 // "assign to agent" action node needs the member list to populate its picker.
 settingsRouter.get("/members", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {

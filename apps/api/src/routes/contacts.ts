@@ -65,6 +65,7 @@ contactsRouter.use(requireAuth, requireWorkspace);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const contactSchema = z.object({
+  numberId: z.string(),
   name: z.string().min(1),
   phone: z.string(),
   email: z.preprocess((v) => v === "" ? undefined : v, z.string().email().optional()),
@@ -75,10 +76,11 @@ const contactSchema = z.object({
 // GET /api/contacts
 contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    const { q, tags, listId, optedOut, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { q, tags, listId, optedOut, numberId, page = "1", limit = "50" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
+    if (numberId) where.numberId = numberId;
     if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }];
     if (tags) where.tags = { hasEvery: tags.split(",") };
     if (optedOut !== undefined) where.optedOut = optedOut === "true";
@@ -109,8 +111,8 @@ contactsRouter.post("/", requireRole("AGENT"), async (req: AuthRequest, res, nex
     if (!isValidPhone(phone)) return res.status(400).json({ error: "Invalid phone number" });
 
     const contact = await prisma.contact.upsert({
-      where: { workspaceId_phone: { workspaceId: req.workspaceId!, phone } },
-      create: { workspaceId: req.workspaceId!, name: body.name, phone, email: body.email, tags: body.tags, customFields: body.customFields as any },
+      where: { workspaceId_numberId_phone: { workspaceId: req.workspaceId!, numberId: body.numberId, phone } },
+      create: { workspaceId: req.workspaceId!, numberId: body.numberId, name: body.name, phone, email: body.email, tags: body.tags, customFields: body.customFields as any },
       update: { name: body.name, email: body.email, tags: body.tags, customFields: body.customFields as any },
     });
 
@@ -179,6 +181,7 @@ contactsRouter.post("/import/parse", upload.single("file"), requireRole("AGENT")
 });
 
 const importMappingSchema = z.object({
+  numberId: z.string(),
   mapping: z.object({
     name: z.string().optional(),
     phone: z.string(),
@@ -200,7 +203,7 @@ contactsRouter.post("/import", requireRole("AGENT"), async (req: AuthRequest, re
     let listId = body.listId;
     if (!listId && body.listName?.trim()) {
       const list = await prisma.contactList.create({
-        data: { workspaceId: req.workspaceId!, name: body.listName.trim() },
+        data: { workspaceId: req.workspaceId!, numberId: body.numberId, name: body.listName.trim() },
       });
       listId = list.id;
     }
@@ -215,6 +218,7 @@ contactsRouter.post("/import", requireRole("AGENT"), async (req: AuthRequest, re
 
     const job = await contactImporterQueue.add("import-contacts", {
       workspaceId: req.workspaceId!,
+      numberId: body.numberId,
       listId,
       contacts,
       deduplicate: body.deduplicate,
@@ -249,8 +253,12 @@ contactsRouter.get("/import/:jobId/status", requireRole("AGENT"), async (req: Au
 // GET /api/contacts/lists
 contactsRouter.get("/lists/all", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
+    const { numberId } = req.query as { numberId?: string };
+    const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
+    if (numberId) where.numberId = numberId;
+
     const lists = await prisma.contactList.findMany({
-      where: { workspaceId: req.workspaceId! },
+      where,
       include: { _count: { select: { members: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -263,9 +271,13 @@ contactsRouter.get("/lists/all", requireRole("AGENT"), async (req: AuthRequest, 
 // POST /api/contacts/lists
 contactsRouter.post("/lists", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    const { name, description } = z.object({ name: z.string().min(2), description: z.string().optional() }).parse(req.body);
+    const { numberId, name, description } = z.object({
+      numberId: z.string(),
+      name: z.string().min(2),
+      description: z.string().optional(),
+    }).parse(req.body);
     const list = await prisma.contactList.create({
-      data: { workspaceId: req.workspaceId!, name, description },
+      data: { workspaceId: req.workspaceId!, numberId, name, description },
     });
     res.status(201).json(list);
   } catch (err) {
@@ -277,11 +289,25 @@ contactsRouter.post("/lists", requireRole("AGENT"), async (req: AuthRequest, res
 contactsRouter.post("/lists/:listId/members", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     const { contactIds } = z.object({ contactIds: z.array(z.string()) }).parse(req.body);
+    const list = await prisma.contactList.findFirst({
+      where: { id: req.params.listId, workspaceId: req.workspaceId! },
+      select: { numberId: true },
+    });
+    if (!list) return res.status(404).json({ error: "List not found" });
+
+    // A list belongs to one number, so only contacts that also belong to it can join —
+    // otherwise a campaign built from this list would try to message a contact that was
+    // never actually associated with the number it's sending from.
+    const validContacts = await prisma.contact.findMany({
+      where: { id: { in: contactIds }, workspaceId: req.workspaceId!, numberId: list.numberId },
+      select: { id: true },
+    });
+
     await prisma.contactListMember.createMany({
-      data: contactIds.map((contactId) => ({ listId: req.params.listId, contactId })),
+      data: validContacts.map((c) => ({ listId: req.params.listId, contactId: c.id })),
       skipDuplicates: true,
     });
-    res.json({ success: true });
+    res.json({ success: true, added: validContacts.length, skipped: contactIds.length - validContacts.length });
   } catch (err) {
     next(err);
   }

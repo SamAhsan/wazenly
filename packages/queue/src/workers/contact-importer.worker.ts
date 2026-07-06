@@ -6,6 +6,7 @@ import { notifyOnFinalJobFailure } from "../services/notification.service";
 
 interface ContactImportJobData {
   workspaceId: string;
+  numberId: string;
   listId?: string;
   contacts: Array<{
     name: string;
@@ -26,7 +27,7 @@ interface ImportSummary {
 }
 
 async function importContacts(job: Job<ContactImportJobData>): Promise<ImportSummary> {
-  const { workspaceId, listId, contacts, deduplicate } = job.data;
+  const { workspaceId, numberId, listId, contacts, deduplicate } = job.data;
 
   let imported = 0;
   let duplicates = 0;
@@ -48,9 +49,10 @@ async function importContacts(job: Job<ContactImportJobData>): Promise<ImportSum
       );
 
       const contact = await prisma.contact.upsert({
-        where: { workspaceId_phone: { workspaceId, phone } },
+        where: { workspaceId_numberId_phone: { workspaceId, numberId, phone } },
         create: {
           workspaceId,
+          numberId,
           name: String(name || phone),
           phone,
           email: email ? String(email) : undefined,

@@ -38,7 +38,7 @@ function mappingStorageKey(columns: string[]): string {
   return `wazenly:import-mapping:${[...columns].sort().join("|")}`;
 }
 
-export function ImportWizard({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+export function ImportWizard({ numberId, onClose, onImported }: { numberId: string; onClose: () => void; onImported: () => void }) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -107,6 +107,7 @@ export function ImportWizard({ onClose, onImported }: { onClose: () => void; onI
     setStep(4);
     try {
       const { data } = await api.post("/contacts/import", {
+        numberId,
         mapping,
         rows,
         listName: listName.trim(),

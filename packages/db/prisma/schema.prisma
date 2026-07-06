@@ -209,6 +209,8 @@ model WhatsAppNumber {
   conversations Conversation[]
   messages      Message[]
   flows         Flow[]
+  contacts      Contact[]
+  contactLists  ContactList[]
 
   @@index([workspaceId])
 }
@@ -289,6 +291,7 @@ model TemplateComponent {
 model Contact {
   id           String    @id @default(cuid())
   workspaceId  String
+  numberId     String
   name         String
   phone        String
   email        String?
@@ -301,30 +304,35 @@ model Contact {
   updatedAt    DateTime  @updatedAt
 
   workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  number           WhatsAppNumber      @relation(fields: [numberId], references: [id])
   listMemberships  ContactListMember[]
   campaignContacts CampaignContact[]
   conversations    Conversation[]
   messages         Message[]
   flowSessions     FlowSession[]
 
-  @@unique([workspaceId, phone])
+  @@unique([workspaceId, numberId, phone])
   @@index([workspaceId])
+  @@index([numberId])
   @@index([phone])
 }
 
 model ContactList {
   id          String   @id @default(cuid())
   workspaceId String
+  numberId    String
   name        String
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  number    WhatsAppNumber      @relation(fields: [numberId], references: [id])
   members   ContactListMember[]
   campaigns Campaign[]          @relation("CampaignContactLists")
 
   @@index([workspaceId])
+  @@index([numberId])
 }
 
 model ContactListMember {

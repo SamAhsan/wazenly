@@ -48,8 +48,9 @@ function NewCampaignPageContent() {
     queryFn: () => api.get("/numbers").then((r) => r.data),
   });
   const { data: lists = [] } = useQuery({
-    queryKey: ["contact-lists"],
-    queryFn: () => api.get("/contacts/lists/all").then((r) => r.data),
+    queryKey: ["contact-lists", draft.numberId],
+    queryFn: () => api.get("/contacts/lists/all", { params: { numberId: draft.numberId } }).then((r) => r.data),
+    enabled: !!draft.numberId,
   });
   const { data: templates = [] } = useQuery({
     queryKey: ["templates", draft.numberId],

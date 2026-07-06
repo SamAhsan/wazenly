@@ -128,7 +128,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
 
           // Upsert contact
           let contact = await prisma.contact.findFirst({
-            where: { workspaceId: number.workspaceId, phone: `+${msg.from}` },
+            where: { workspaceId: number.workspaceId, numberId: number.id, phone: `+${msg.from}` },
           });
           const isNewContact = !contact;
 
@@ -136,6 +136,7 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             contact = await prisma.contact.create({
               data: {
                 workspaceId: number.workspaceId,
+                numberId: number.id,
                 name: contactName || `+${msg.from}`,
                 phone: `+${msg.from}`,
               },

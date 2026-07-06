@@ -223,7 +223,7 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
         // with that exact phone already exists, so fall back to a phone lookup too.
         const contact = cc.contactId
           ? await prisma.contact.findUnique({ where: { id: cc.contactId }, select: { id: true, name: true } })
-          : await prisma.contact.findFirst({ where: { workspaceId, phone: cc.phone }, select: { id: true, name: true } });
+          : await prisma.contact.findFirst({ where: { workspaceId, numberId: campaign.number.id, phone: cc.phone }, select: { id: true, name: true } });
         const contactId = cc.contactId || contact?.id;
 
         const conversation = await prisma.conversation.upsert({

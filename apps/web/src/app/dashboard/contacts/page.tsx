@@ -45,14 +45,16 @@ function ContactsPageContent() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", search, optedOutFilter],
-    queryFn: () => api.get("/contacts", { params: { q: search || undefined, optedOut: optedOutFilter } }).then((r) => r.data),
+    queryKey: ["contacts", search, optedOutFilter, selectedNumberId],
+    queryFn: () => api.get("/contacts", { params: { q: search || undefined, optedOut: optedOutFilter, numberId: selectedNumberId } }).then((r) => r.data),
     placeholderData: (prev) => prev,
+    enabled: !!selectedNumberId,
   });
 
   const { data: lists = [] } = useQuery<ContactList[]>({
-    queryKey: ["contact-lists"],
-    queryFn: () => api.get("/contacts/lists/all").then((r) => r.data),
+    queryKey: ["contact-lists", selectedNumberId],
+    queryFn: () => api.get("/contacts/lists/all", { params: { numberId: selectedNumberId } }).then((r) => r.data),
+    enabled: !!selectedNumberId,
   });
 
   const { data: listContacts, isLoading: listContactsLoading } = useQuery({
@@ -72,7 +74,7 @@ function ContactsPageContent() {
 
   const addContact = useMutation({
     mutationFn: (d: { name: string; phone: string; email?: string }) => {
-      const payload: { name: string; phone: string; email?: string } = { name: d.name, phone: d.phone };
+      const payload: { numberId: string | null; name: string; phone: string; email?: string } = { numberId: selectedNumberId, name: d.name, phone: d.phone };
       if (d.email) payload.email = d.email;
       return api.post("/contacts", payload);
     },
@@ -86,7 +88,7 @@ function ContactsPageContent() {
   });
 
   const createList = useMutation({
-    mutationFn: (d: { name: string; description?: string }) => api.post("/contacts/lists", d),
+    mutationFn: (d: { name: string; description?: string }) => api.post("/contacts/lists", { ...d, numberId: selectedNumberId }),
     onSuccess: () => { toast.success("List created"); qc.invalidateQueries({ queryKey: ["contact-lists"] }); setShowCreateList(false); resetList(); },
     onError: () => toast.error("Failed to create list"),
   });
@@ -158,35 +160,53 @@ function ContactsPageContent() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
-          <p className="text-gray-500 text-sm mt-1">{data?.total || 0} total contacts · {lists.length} lists</p>
+          <p className="text-gray-500 text-sm mt-1">
+            {selectedNumberId
+              ? `${data?.total || 0} total contacts · ${lists.length} lists`
+              : "Select a number from the top bar to view its contacts"}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowImportWizard(true)}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
-          >
-            <Upload className="w-4 h-4" /> Import
-          </button>
-          {tab === "contacts" && (
+        {selectedNumberId && (
+          <div className="flex gap-2">
             <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
+              onClick={() => setShowImportWizard(true)}
+              className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
             >
-              <Plus className="w-4 h-4" /> Add Contact
+              <Upload className="w-4 h-4" /> Import
             </button>
-          )}
-          {tab === "lists" && (
-            <button
-              onClick={() => setShowCreateList(true)}
-              className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" /> New List
-            </button>
-          )}
-        </div>
+            {tab === "contacts" && (
+              <button
+                onClick={() => setShowAdd(true)}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" /> Add Contact
+              </button>
+            )}
+            {tab === "lists" && (
+              <button
+                onClick={() => setShowCreateList(true)}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" /> New List
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
+      {!selectedNumberId && (
+        <div className="text-center py-20">
+          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Users className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No number selected</h3>
+          <p className="text-gray-500 text-sm">Contacts belong to a specific WhatsApp number — pick one from the top bar to continue.</p>
+        </div>
+      )}
+
       {/* Tabs */}
+      {selectedNumberId && (
+      <>
       <div className="flex gap-1 border-b border-gray-100">
         {[{ key: "contacts", label: "All Contacts", icon: Users }, { key: "lists", label: "Lists", icon: List }].map(({ key, label, icon: Icon }) => (
           <button
@@ -413,6 +433,8 @@ function ContactsPageContent() {
           )}
         </>
       )}
+      </>
+      )}
 
       {/* ── SEND TEMPLATE MODAL ── */}
       {sendContact && (
@@ -489,8 +511,9 @@ function ContactsPageContent() {
       )}
 
       {/* ── IMPORT WIZARD ── */}
-      {showImportWizard && (
+      {showImportWizard && selectedNumberId && (
         <ImportWizard
+          numberId={selectedNumberId}
           onClose={() => setShowImportWizard(false)}
           onImported={() => {
             qc.invalidateQueries({ queryKey: ["contacts"] });
