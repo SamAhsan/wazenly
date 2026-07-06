@@ -36,6 +36,7 @@ import {
   createContactImporterWorker,
   createFlowWorker,
   createNotificationWorker,
+  createNumberHealthWorker,
 } from "@wazenly/queue";
 
 const app = express();
@@ -106,6 +107,7 @@ createTemplateSyncWorker();
 createContactImporterWorker();
 createFlowWorker();
 createNotificationWorker(io);
+createNumberHealthWorker();
 
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, () => {

@@ -161,9 +161,27 @@ numbersRouter.post("/:id/rotate-token", requireRole("ADMIN"), async (req: AuthRe
 // DELETE /api/numbers/:id
 numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
-    await prisma.whatsAppNumber.deleteMany({
+    const number = await prisma.whatsAppNumber.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
     });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    // Campaign/Conversation/Message/Flow/Template all reference this number without
+    // a DB-level cascade (by design, so unrelated delete paths for those models stay
+    // protected). Deleting a number is a deliberate, explicit "wipe everything under
+    // it" action, so we cascade by hand here, ordered so each delete's own children
+    // (already DB-cascaded one level down, e.g. Campaign -> CampaignContact) are gone
+    // before we remove anything a sibling step still points to.
+    await prisma.$transaction([
+      prisma.message.deleteMany({ where: { numberId: number.id } }),
+      prisma.conversation.deleteMany({ where: { numberId: number.id } }),
+      prisma.campaign.deleteMany({ where: { numberId: number.id } }),
+      prisma.flow.deleteMany({ where: { numberId: number.id } }),
+      prisma.template.deleteMany({ where: { numberId: number.id } }),
+      prisma.whatsAppNumber.delete({ where: { id: number.id } }),
+    ]);
+
     res.json({ success: true });
   } catch (err) {
     next(err);

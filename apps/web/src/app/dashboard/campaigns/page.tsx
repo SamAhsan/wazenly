@@ -132,8 +132,8 @@ function CampaignsPageContent() {
                   </td>
                   <td className="px-5 py-4 text-sm text-right text-gray-600">{formatNumber(c.totalRecipients)}</td>
                   <td className="px-5 py-4 text-sm text-right text-gray-600">{formatNumber(c.sentCount)}</td>
-                  <td className="px-5 py-4 text-sm text-right font-medium text-gray-900">{pct(c.deliveredCount, c.sentCount)}</td>
-                  <td className="px-5 py-4 text-sm text-right font-medium text-primary">{pct(c.readCount, c.deliveredCount)}</td>
+                  <td className="px-5 py-4 text-sm text-right font-medium text-gray-900">{pct(c.deliveredCount, c.totalRecipients)}</td>
+                  <td className="px-5 py-4 text-sm text-right font-medium text-primary">{pct(c.readCount, c.totalRecipients)}</td>
                   <td className="px-5 py-4 text-xs text-gray-500">{c.scheduledAt ? formatDateTime(c.scheduledAt) : "—"}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">

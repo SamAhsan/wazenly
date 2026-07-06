@@ -62,4 +62,14 @@ export const flowExecutorQueue = new Queue(QUEUE_NAMES.FLOW_EXECUTOR, {
   },
 });
 
+export const numberHealthCheckQueue = new Queue(QUEUE_NAMES.NUMBER_HEALTH_CHECK, {
+  connection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "fixed", delay: 30000 },
+    removeOnComplete: { count: 20 },
+    removeOnFail: { count: 50 },
+  },
+});
+
 export { connection };

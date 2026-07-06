@@ -32,6 +32,9 @@ messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res,
       include: { number: true },
     });
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.number.status === "DISCONNECTED") {
+      return res.status(400).json({ error: "This number is disconnected. Reconnect it in Numbers before sending." });
+    }
 
     const accessToken = decrypt(conversation.number.accessToken);
     const meta = new MetaApiService(accessToken, conversation.number.phoneNumberId);

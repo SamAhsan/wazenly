@@ -127,6 +127,15 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
     return;
   }
 
+  if (campaign.number.status === "DISCONNECTED") {
+    console.log(`[Campaign ${campaignId}] Number ${campaign.number.displayName} is disconnected — marking campaign FAILED`);
+    await prisma.campaign.update({
+      where: { id: campaignId },
+      data: { status: "FAILED" },
+    });
+    return;
+  }
+
   // Check quiet hours
   const inQuiet = await isInQuietHours(campaign.quietHoursStart, campaign.quietHoursEnd, campaign.timezone);
   if (inQuiet) {

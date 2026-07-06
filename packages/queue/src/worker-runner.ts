@@ -8,7 +8,8 @@ import { createTemplateSyncWorker } from "./workers/template-sync.worker";
 import { createContactImporterWorker } from "./workers/contact-importer.worker";
 import { createFlowWorker } from "./workers/flow.worker";
 import { createNotificationWorker } from "./workers/notification.worker";
-import { templateSyncQueue } from "./queues";
+import { createNumberHealthWorker } from "./workers/number-health.worker";
+import { templateSyncQueue, numberHealthCheckQueue } from "./queues";
 import { prisma } from "@wazenly/db";
 
 async function startWorkers() {
@@ -21,6 +22,7 @@ async function startWorkers() {
     createContactImporterWorker(),
     createFlowWorker(),
     createNotificationWorker(),
+    createNumberHealthWorker(),
   ];
 
   // Schedule hourly template sync for all connected numbers
@@ -30,6 +32,18 @@ async function startWorkers() {
     {
       repeat: { every: 3600000 },
       jobId: "template-sync-recurring",
+    }
+  );
+
+  // Schedule a health check every 30 minutes for every number (any status), so a
+  // number removed/disabled on Meta's side gets marked DISCONNECTED automatically,
+  // and one that was wrongly marked disconnected can recover too.
+  await numberHealthCheckQueue.add(
+    "check-all-numbers",
+    {},
+    {
+      repeat: { every: 1800000 },
+      jobId: "number-health-check-recurring",
     }
   );
 

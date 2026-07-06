@@ -15,6 +15,7 @@ export const QUEUE_NAMES = {
   CONTACT_IMPORTER: "contact-importer",
   NOTIFICATION_SENDER: "notification-sender",
   FLOW_EXECUTOR: "flow-executor",
+  NUMBER_HEALTH_CHECK: "number-health-check",
 } as const;
 
 export const CAMPAIGN_BATCH_SIZE = 50;
