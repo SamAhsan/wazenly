@@ -1,5 +1,6 @@
 import { Server as SocketServer } from "socket.io";
 import jwt from "jsonwebtoken";
+import { prisma } from "@wazenly/db";
 
 export function setupSocketHandlers(io: SocketServer): void {
   io.use((socket, next) => {
@@ -28,8 +29,14 @@ export function setupSocketHandlers(io: SocketServer): void {
       socket.join(`user:${userId}`);
     }
 
-    socket.on("conversation:join", (conversationId: string) => {
-      socket.join(`conversation:${conversationId}`);
+    socket.on("conversation:join", async (conversationId: string) => {
+      // Without this check, any authenticated socket could join any conversation room
+      // by id and receive another company's typing indicators.
+      const conversation = await prisma.conversation.findFirst({
+        where: { id: conversationId, workspaceId },
+        select: { id: true },
+      });
+      if (conversation) socket.join(`conversation:${conversationId}`);
     });
 
     socket.on("conversation:leave", (conversationId: string) => {

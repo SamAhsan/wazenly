@@ -32,8 +32,24 @@ function SettingsPageContent() {
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: () => api.get("/settings/members").then((r) => r.data) });
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("AGENT");
+
+  // Only an Owner belongs to more than one company — let them pick which one an
+  // invite goes into instead of always using whichever is currently active.
+  const { data: me } = useQuery<{ workspaces: { id: string; name: string; number: { displayName: string } | null }[] }>({
+    queryKey: ["me"],
+    queryFn: () => api.get("/auth/me").then((r) => r.data),
+  });
+  const companies = me?.workspaces || [];
+  const [inviteCompanyId, setInviteCompanyId] = useState<string | undefined>(undefined);
+  const activeInviteCompanyId = inviteCompanyId || session?.workspaceId;
+
   const inviteMutation = useMutation({
-    mutationFn: () => api.post("/settings/members/invite", { email: inviteEmail, role: inviteRole }),
+    mutationFn: () =>
+      api.post(
+        "/settings/members/invite",
+        { email: inviteEmail, role: inviteRole },
+        companies.length > 1 ? { headers: { "x-workspace-id": activeInviteCompanyId } } : undefined
+      ),
     onSuccess: () => {
       toast.success("Invite sent");
       setInviteEmail("");
@@ -147,6 +163,16 @@ function SettingsPageContent() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
             <h2 className="font-semibold text-gray-900 mb-4">Invite Team Member</h2>
+            {companies.length > 1 && (
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                <select value={activeInviteCompanyId} onChange={(e) => setInviteCompanyId(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.number?.displayName || c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex gap-3">
               <div className="relative flex-1">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

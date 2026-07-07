@@ -12,6 +12,7 @@ import { Server as SocketServer } from "socket.io";
 
 import { authRouter } from "./routes/auth";
 import { numbersRouter } from "./routes/numbers";
+import { workspacesRouter } from "./routes/workspaces";
 import { campaignsRouter } from "./routes/campaigns";
 import { templatesRouter } from "./routes/templates";
 import { contactsRouter } from "./routes/contacts";
@@ -78,6 +79,7 @@ app.use("/uploads", express.static(UPLOADS_DIR, {
 app.use("/api/auth", authRouter);
 app.use("/api/webhooks", webhooksRouter);
 app.use("/api/numbers", numbersRouter);
+app.use("/api/workspaces", workspacesRouter);
 app.use("/api/campaigns", campaignsRouter);
 app.use("/api/templates", templatesRouter);
 app.use("/api/contacts", contactsRouter);

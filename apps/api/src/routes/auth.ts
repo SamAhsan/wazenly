@@ -26,7 +26,7 @@ const registerSchema = z.object({
 const EMAIL_VERIFICATION_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TTL_HOURS) || 24;
 const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== "false";
 
-function createToken(userId: string, workspaceId?: string): string {
+export function createToken(userId: string, workspaceId?: string): string {
   return jwt.sign(
     { sub: userId, workspaceId },
     process.env.NEXTAUTH_SECRET || "secret",
@@ -63,7 +63,7 @@ async function issueVerificationEmail(email: string, name: string | null): Promi
   });
 }
 
-async function createDefaultWorkspace(
+export async function createDefaultWorkspace(
   tx: Prisma.TransactionClient,
   userId: string,
   workspaceName: string
@@ -313,10 +313,20 @@ authRouter.get("/me", async (req, res, next) => {
 
     const workspaces = await prisma.workspaceMember.findMany({
       where: { userId: user.id },
-      include: { workspace: true },
+      include: {
+        workspace: {
+          include: { numbers: { select: { id: true, displayName: true, phoneNumber: true, status: true } } },
+        },
+      },
     });
 
-    res.json({ user, workspaces: workspaces.map((m) => ({ ...m.workspace, role: m.role })) });
+    res.json({
+      user,
+      workspaces: workspaces.map((m) => {
+        const { numbers, ...workspace } = m.workspace;
+        return { ...workspace, role: m.role, number: numbers[0] || null };
+      }),
+    });
   } catch (err) {
     next(err);
   }

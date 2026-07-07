@@ -188,7 +188,7 @@ enum NumberTier {
 
 model WhatsAppNumber {
   id                  String       @id @default(cuid())
-  workspaceId         String
+  workspaceId         String       @unique
   displayName         String
   phoneNumber         String
   phoneNumberId       String       @unique

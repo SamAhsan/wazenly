@@ -11,9 +11,14 @@ api.interceptors.request.use(async (config) => {
   if (session?.accessToken) {
     config.headers.Authorization = `Bearer ${session.accessToken}`;
   }
-  const workspaceId = typeof window !== "undefined" ? sessionStorage.getItem("workspaceId") : null;
-  if (workspaceId) {
-    config.headers["x-workspace-id"] = workspaceId;
+  // A caller can set x-workspace-id explicitly (e.g. an Owner inviting into a
+  // different company than the one currently active) — only fall back to the
+  // active company from sessionStorage when the call didn't already specify one.
+  if (!config.headers["x-workspace-id"]) {
+    const workspaceId = typeof window !== "undefined" ? sessionStorage.getItem("workspaceId") : null;
+    if (workspaceId) {
+      config.headers["x-workspace-id"] = workspaceId;
+    }
   }
   return config;
 });

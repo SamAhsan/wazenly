@@ -1,16 +1,92 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { Bell, ChevronDown, LogOut, Settings, User, Phone, CheckCircle, Menu } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Settings, User, Phone, CheckCircle, Menu, Building2 } from "lucide-react";
 import { getInitials, formatRelativeTime } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { io, Socket } from "socket.io-client";
 import Link from "next/link";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 
 type WhatsAppNumber = { id: string; displayName: string; phoneNumber: string; status: string };
+type CompanyMembership = {
+  id: string;
+  name: string;
+  role: string;
+  number: { id: string; displayName: string; phoneNumber: string; status: string } | null;
+};
+
+// Owner-only: shown instead of the plain number display when the account belongs to
+// more than one company. Switching reissues a token scoped to the chosen company and
+// hard-reloads, so every page, cached query, and the WebSocket connection start clean.
+function CompanySwitcher({ companies, currentWorkspaceId }: { companies: CompanyMembership[]; currentWorkspaceId?: string }) {
+  const { update } = useSession();
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const current = companies.find((c) => c.id === currentWorkspaceId) || companies[0];
+
+  async function switchTo(companyId: string) {
+    if (companyId === currentWorkspaceId) { setOpen(false); return; }
+    setSwitching(true);
+    try {
+      const { data } = await api.post(`/workspaces/${companyId}/switch`);
+      await update({ accessToken: data.token, workspaceId: data.workspaceId, role: data.role });
+      window.location.href = "/dashboard";
+    } catch {
+      toast.error("Failed to switch company");
+      setSwitching(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={switching}
+        className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-60"
+      >
+        <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+          <Building2 className="w-3.5 h-3.5 text-primary" />
+        </div>
+        <div className="text-left hidden sm:block">
+          <p className="text-xs text-gray-400 leading-none">Active Company</p>
+          <p className="text-sm font-semibold text-gray-900 mt-0.5 leading-none">
+            {switching ? "Switching…" : current?.number?.displayName || current?.name || "—"}
+          </p>
+        </div>
+        <ChevronDown className="w-4 h-4 text-gray-400 ml-1" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 w-72 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-20">
+            <p className="px-4 pt-2 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">Switch Company</p>
+            {companies.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => switchTo(c.id)}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left transition-colors ${c.id === currentWorkspaceId ? "bg-primary/5" : ""}`}
+              >
+                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Building2 className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{c.number?.displayName || c.name}</p>
+                  <p className="text-xs text-gray-500">{c.number?.phoneNumber || "No number connected"}</p>
+                </div>
+                {c.id === currentWorkspaceId && <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 type Notification = { id: string; type: string; title: string; message: string; link?: string; readAt: string | null; createdAt: string };
 
 function NotificationBell() {
@@ -112,6 +188,15 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
     queryFn: () => api.get("/numbers").then((r) => r.data),
   });
 
+  // Only ever has more than one entry for the account Owner — everyone else is invited
+  // into exactly one company and should never know others exist.
+  const { data: me } = useQuery<{ workspaces: CompanyMembership[] }>({
+    queryKey: ["me"],
+    queryFn: () => api.get("/auth/me").then((r) => r.data),
+    enabled: !!session?.accessToken,
+  });
+  const companies = me?.workspaces || [];
+
   // Feed numbers into context so other components can use them
   useEffect(() => {
     if (numbers.length > 0) setNumbers(numbers);
@@ -137,7 +222,10 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         <Menu className="w-5 h-5" />
       </button>
 
-      {/* Number selector */}
+      {/* Company selector (Owner with multiple companies) or plain number display */}
+      {companies.length > 1 ? (
+        <CompanySwitcher companies={companies} currentWorkspaceId={session?.workspaceId} />
+      ) : (
       <div className="relative">
         {connectedNumbers.length > 0 ? (
           <button
@@ -188,6 +276,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           </>
         )}
       </div>
+      )}
 
       <div className="flex items-center gap-3">
         <NotificationBell />

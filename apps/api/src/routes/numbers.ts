@@ -6,6 +6,7 @@ import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../midd
 import { encrypt, decrypt } from "@wazenly/shared";
 import { MetaApiService } from "../services/meta.service";
 import { templateSyncQueue } from "@wazenly/queue";
+import { createDefaultWorkspace } from "./auth";
 
 export const numbersRouter = Router();
 numbersRouter.use(requireAuth, requireWorkspace);
@@ -35,10 +36,21 @@ numbersRouter.get("/", async (req: AuthRequest, res, next) => {
   }
 });
 
-// POST /api/numbers
+// POST /api/numbers — each workspace holds at most one number (enforced by a DB unique
+// constraint), so this either fills a brand-new, number-less workspace (normal signup
+// path) or, if the caller's current workspace already has its one number, spins up an
+// entirely new company workspace for it. Only the Owner may create additional companies.
 numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
   try {
     const body = numberSchema.parse(req.body);
+
+    const existingNumber = await prisma.whatsAppNumber.findFirst({
+      where: { workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (existingNumber && req.role !== "OWNER") {
+      return res.status(403).json({ error: "This company already has a number. Only the account Owner can add a new company." });
+    }
 
     // Verify number with Meta and auto-fetch business name + phone number
     const meta = new MetaApiService(body.accessToken, body.phoneNumberId);
@@ -60,9 +72,15 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
       console.warn("[Numbers] Could not resolve Meta App ID from access token — media template uploads for this number will fall back to META_APP_ID env var.");
     }
 
+    const targetWorkspaceId = await prisma.$transaction(async (tx) => {
+      if (!existingNumber) return req.workspaceId!;
+      const newWorkspace = await createDefaultWorkspace(tx, req.userId!, metaInfo.verified_name);
+      return newWorkspace.id;
+    });
+
     const number = await prisma.whatsAppNumber.create({
       data: {
-        workspaceId: req.workspaceId!,
+        workspaceId: targetWorkspaceId,
         displayName: metaInfo.verified_name,
         phoneNumber: metaInfo.display_phone_number,
         phoneNumberId: body.phoneNumberId,
@@ -83,14 +101,14 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
 
     // Trigger template sync
     await templateSyncQueue.add("sync-templates", {
-      workspaceId: req.workspaceId!,
+      workspaceId: targetWorkspaceId,
       numberId: number.id,
       wabaId: body.wabaId,
       accessToken: encrypt(body.accessToken),
     });
 
     const { accessToken: _, ...safeNumber } = number;
-    res.status(201).json({ ...safeNumber, metaInfo });
+    res.status(201).json({ ...safeNumber, metaInfo, workspaceId: targetWorkspaceId, isNewCompany: !!existingNumber });
   } catch (err) {
     next(err);
   }

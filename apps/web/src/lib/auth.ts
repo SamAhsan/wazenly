@@ -70,12 +70,19 @@ export const authOptions: NextAuthOptions = {
         return false;
       }
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         const u = user as { accessToken?: string; workspaceId?: string; role?: string };
         token.accessToken = u.accessToken;
         token.workspaceId = u.workspaceId;
         token.role = u.role;
+      }
+      // Lets the client push a freshly-issued token after switching companies
+      // (see POST /api/workspaces/:id/switch) without a full re-login.
+      if (trigger === "update" && session) {
+        token.accessToken = session.accessToken;
+        token.workspaceId = session.workspaceId;
+        token.role = session.role;
       }
       return token;
     },
