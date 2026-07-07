@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
 import api from "@/lib/api";
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const router = useRouter();
   const params = useParams<{ token: string }>();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite");
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
 
   useEffect(() => {
@@ -16,10 +18,14 @@ export default function VerifyEmailPage() {
       .post("/auth/verify-email", { token: params.token })
       .then(() => {
         setStatus("success");
-        setTimeout(() => router.push("/auth/login"), 2500);
+        // Carry the invite token forward so login lands on /invite/[token] and
+        // actually completes joining the workspace, instead of a plain dashboard
+        // redirect that leaves the account with no workspace at all.
+        const loginUrl = inviteToken ? `/auth/login?invite=${inviteToken}` : "/auth/login";
+        setTimeout(() => router.push(loginUrl), 2500);
       })
       .catch(() => setStatus("error"));
-  }, [params.token, router]);
+  }, [params.token, inviteToken, router]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
@@ -56,5 +62,13 @@ export default function VerifyEmailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />}>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

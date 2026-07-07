@@ -42,7 +42,7 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-async function issueVerificationEmail(email: string, name: string | null): Promise<void> {
+async function issueVerificationEmail(email: string, name: string | null, inviteToken?: string): Promise<void> {
   await prisma.emailVerificationToken.deleteMany({ where: { email } });
   const rawToken = crypto.randomBytes(32).toString("hex");
   await prisma.emailVerificationToken.create({
@@ -52,7 +52,11 @@ async function issueVerificationEmail(email: string, name: string | null): Promi
       expires: new Date(Date.now() + EMAIL_VERIFICATION_TTL_HOURS * 3600000),
     },
   });
-  const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/verify/${rawToken}`;
+  // Carry the invite token through the verification link -- otherwise a user who
+  // registered via an invite lands on a plain login page afterward with no memory
+  // of the invite, never actually joins the workspace, and ends up stuck in a
+  // login<->dashboard redirect loop with zero workspace membership.
+  const verifyUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/verify/${rawToken}${inviteToken ? `?invite=${inviteToken}` : ""}`;
   if (process.env.NODE_ENV === "development") {
     console.log(`[Dev] Verification link for ${email}: ${verifyUrl}`);
   }
@@ -122,7 +126,7 @@ authRouter.post("/register", authRateLimiter, async (req, res, next) => {
     });
 
     try {
-      await issueVerificationEmail(user.email, user.name);
+      await issueVerificationEmail(user.email, user.name, body.inviteToken);
     } catch (mailErr) {
       console.error("[Register] Failed to send verification email:", mailErr);
     }
