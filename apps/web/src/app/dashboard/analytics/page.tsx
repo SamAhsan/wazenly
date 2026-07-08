@@ -4,9 +4,17 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { TrendingUp, TrendingDown, MessageSquare, CheckCircle2, Eye, AlertCircle, Megaphone, Users } from "lucide-react";
+import { TrendingUp, TrendingDown, MessageSquare, CheckCircle2, Eye, AlertCircle, Megaphone, Users, UserX, Ban, ShieldAlert, Clock } from "lucide-react";
 import api from "@/lib/api";
-import { formatNumber, pct, formatDate } from "@/lib/utils";
+import { formatNumber, pct, formatDate, statusColor } from "@/lib/utils";
+
+const SUPPRESSION_STATUSES: { key: string; label: string; icon: React.ElementType }[] = [
+  { key: "UNSUBSCRIBED", label: "Unsubscribed", icon: UserX },
+  { key: "BLACKLISTED", label: "Blacklisted", icon: Ban },
+  { key: "INVALID", label: "Invalid", icon: AlertCircle },
+  { key: "DORMANT", label: "Dormant", icon: Clock },
+  { key: "FAILED_DELIVERY", label: "Failed Delivery", icon: ShieldAlert },
+];
 
 const PRESETS = [
   { label: "Today", days: 0 },
@@ -73,6 +81,13 @@ export default function AnalyticsPage() {
     queryKey: ["analytics-numbers", range],
     queryFn: () => api.get("/analytics/numbers", { params: range }).then((r) => r.data),
   });
+
+  const { data: suppression } = useQuery({
+    queryKey: ["analytics-suppression", range, selectedNumberId],
+    queryFn: () => api.get("/analytics/suppression", { params: { ...range, ...numberParam } }).then((r) => r.data),
+  });
+  const suppressionCounts: Record<string, number> = suppression?.counts || {};
+  const totalContacts = Object.values(suppressionCounts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -193,6 +208,66 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* Contact Health & Suppression */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">Contact Health & Suppression</h2>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {SUPPRESSION_STATUSES.map(({ key, label, icon: Icon }) => (
+            <div key={key} className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm text-gray-500 font-medium">{label}</p>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${statusColor(key)}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{formatNumber(suppressionCounts[key] || 0)}</p>
+              <p className="text-xs text-gray-400 mt-1">{pct(suppressionCounts[key] || 0, totalContacts)} of contacts</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">New Suppressions (Unsubscribed / Blacklisted / Invalid)</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={suppression?.trend || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => formatDate(v, "MMM d")} />
+                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                <Tooltip labelFormatter={(v) => formatDate(v as string)} />
+                <Bar dataKey="count" name="New suppressions" fill="#EF4444" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900">Top Blacklist Reasons</h3>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-gray-500 border-b border-gray-50">
+                  <th className="text-left px-5 py-3">Reason</th>
+                  <th className="text-right px-5 py-3">Contacts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(suppression?.topBlacklistReasons || []).map((r: { reason: string; count: number }) => (
+                  <tr key={r.reason} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="px-5 py-3 text-gray-900">{r.reason}</td>
+                    <td className="px-5 py-3 text-right font-medium">{r.count}</td>
+                  </tr>
+                ))}
+                {(!suppression?.topBlacklistReasons || suppression.topBlacklistReasons.length === 0) && (
+                  <tr><td colSpan={2} className="text-center py-8 text-gray-400 text-sm">No blacklisted contacts yet</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -288,20 +288,35 @@ model TemplateComponent {
 // CONTACTS
 // ─────────────────────────────────────────────────────────
 
+enum ContactStatus {
+  ACTIVE
+  UNSUBSCRIBED
+  BLACKLISTED
+  INVALID
+  DORMANT
+  FAILED_DELIVERY
+}
+
 model Contact {
-  id           String    @id @default(cuid())
-  workspaceId  String
-  numberId     String
-  name         String
-  phone        String
-  email        String?
-  tags         String[]
-  customFields Json?
-  optedOut     Boolean   @default(false)
-  optedOutAt   DateTime?
-  lastMessaged DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                  String        @id @default(cuid())
+  workspaceId         String
+  numberId            String
+  name                String
+  phone               String
+  email               String?
+  tags                String[]
+  customFields        Json?
+  optedOut            Boolean       @default(false)
+  optedOutAt          DateTime?
+  status              ContactStatus @default(ACTIVE)
+  statusReason        String?
+  statusChangedAt     DateTime?
+  statusChangedBy     String?
+  engagementScore     Int           @default(50)
+  consecutiveFailures Int           @default(0)
+  lastMessaged        DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   number           WhatsAppNumber      @relation(fields: [numberId], references: [id])
@@ -315,6 +330,7 @@ model Contact {
   @@index([workspaceId])
   @@index([numberId])
   @@index([phone])
+  @@index([status])
 }
 
 model ContactList {

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, ChevronLeft, Check, Rocket, Users } from "lucide-react";
+import { ChevronRight, ChevronLeft, Check, Rocket, Users, AlertTriangle } from "lucide-react";
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
@@ -59,7 +59,13 @@ function NewCampaignPageContent() {
     enabled: !!draft.numberId,
   });
 
-  const createMutation = useMutation({
+  // The safety-preview needs a real campaign id to query against, so the Review
+  // step creates the campaign as a DRAFT (with its audience already attached) as
+  // soon as it's reached, and "Launch" just launches that same draft afterward —
+  // rather than creating and launching in one shot with no chance to warn first.
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+
+  const createDraftMutation = useMutation({
     mutationFn: async (data: Partial<CampaignDraft>) => {
       const campaign = await api.post("/campaigns", {
         name: data.name,
@@ -74,30 +80,34 @@ function NewCampaignPageContent() {
         quietHoursEnd: data.quietHoursEnd,
         contactListIds: data.contactListIds,
       });
-      await api.post(`/campaigns/${campaign.data.id}/launch`);
       return campaign.data;
     },
+    onSuccess: (data) => setCampaignId(data.id),
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to save campaign draft"),
+  });
+
+  useEffect(() => {
+    if (step === 4 && !campaignId && !createDraftMutation.isPending) {
+      createDraftMutation.mutate(draft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  const { data: audiencePreview } = useQuery({
+    queryKey: ["audience-preview", campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/audience-preview`).then((r) => r.data),
+    enabled: !!campaignId,
+  });
+
+  const launchMutation = useMutation({
+    mutationFn: () => api.post(`/campaigns/${campaignId}/launch`),
     onSuccess: () => {
       toast.success("Campaign launched!");
       router.push("/dashboard/campaigns");
     },
     onError: (e: { response?: { data?: { error?: string } } }) =>
-      toast.error(e.response?.data?.error || "Failed to create campaign"),
-  });
-
-  const saveDraftMutation = useMutation({
-    mutationFn: async (data: Partial<CampaignDraft>) =>
-      api.post("/campaigns", {
-        name: data.name,
-        description: data.description,
-        numberId: data.numberId,
-        templateId: data.templateId,
-        type: data.type || "ONE_TIME",
-        timezone: data.timezone || "UTC",
-        rateLimit: data.rateLimit || 60,
-        contactListIds: data.contactListIds,
-      }),
-    onSuccess: () => { toast.success("Saved as draft"); router.push("/dashboard/campaigns"); },
+      toast.error(e.response?.data?.error || "Failed to launch campaign"),
   });
 
   function update(fields: Partial<CampaignDraft>) {
@@ -306,6 +316,36 @@ function NewCampaignPageContent() {
                 </div>
               ))}
             </div>
+
+            {createDraftMutation.isPending && <p className="text-sm text-gray-400">Preparing audience preview…</p>}
+
+            {audiencePreview && (
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                  <p className="text-sm font-semibold text-gray-900">Audience Safety Check</p>
+                </div>
+                <div className="p-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Will actually receive this campaign</span>
+                    <span className="font-semibold text-green-700">{audiencePreview.sendable}</span>
+                  </div>
+                  {audiencePreview.suppressed > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Skipped (Unsubscribed / Blacklisted / Invalid)</span>
+                      <span className="font-semibold text-red-600">{audiencePreview.suppressed}</span>
+                    </div>
+                  )}
+                  {audiencePreview.softFlagged > 0 && (
+                    <div className="flex items-start gap-2 mt-2 p-2.5 bg-amber-50 rounded-lg">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-700">
+                        {audiencePreview.softFlagged} of the contacts that will receive this are marked Dormant or Failed-Delivery — included since those statuses aren&apos;t auto-excluded, but worth a second look if this isn&apos;t a re-engagement campaign.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -322,11 +362,11 @@ function NewCampaignPageContent() {
         <div className="flex gap-2">
           {step === 4 && (
             <button
-              onClick={() => saveDraftMutation.mutate(draft)}
-              disabled={saveDraftMutation.isPending}
+              onClick={() => router.push("/dashboard/campaigns")}
+              disabled={createDraftMutation.isPending}
               className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
             >
-              Save Draft
+              {campaignId ? "Keep as Draft" : "Save Draft"}
             </button>
           )}
           {step < 4 ? (
@@ -339,11 +379,11 @@ function NewCampaignPageContent() {
             </button>
           ) : (
             <button
-              onClick={() => createMutation.mutate(draft)}
-              disabled={createMutation.isPending}
+              onClick={() => launchMutation.mutate()}
+              disabled={launchMutation.isPending || !campaignId}
               className="flex items-center gap-2 bg-primary text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-50"
             >
-              <Rocket className="w-4 h-4" /> {createMutation.isPending ? "Launching..." : "Launch Campaign"}
+              <Rocket className="w-4 h-4" /> {launchMutation.isPending ? "Launching..." : "Launch Campaign"}
             </button>
           )}
         </div>

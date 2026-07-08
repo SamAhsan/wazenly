@@ -72,4 +72,14 @@ export const numberHealthCheckQueue = new Queue(QUEUE_NAMES.NUMBER_HEALTH_CHECK,
   },
 });
 
+export const contactEngagementQueue = new Queue(QUEUE_NAMES.CONTACT_ENGAGEMENT, {
+  connection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "fixed", delay: 30000 },
+    removeOnComplete: { count: 20 },
+    removeOnFail: { count: 50 },
+  },
+});
+
 export { connection };

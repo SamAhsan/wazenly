@@ -4,17 +4,20 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, UserCheck, UserX, List, X, Check, Send } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
-import { formatRelativeTime, getInitials } from "@/lib/utils";
+import { formatRelativeTime, getInitials, statusColor } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
 import { ImportWizard } from "@/components/contacts/ImportWizard";
+
+const CONTACT_STATUSES = ["ACTIVE", "UNSUBSCRIBED", "BLACKLISTED", "INVALID", "DORMANT", "FAILED_DELIVERY"];
 
 type Contact = {
   id: string; name: string; email?: string; phone: string; tags: string[];
   listMemberships: { list: { id: string; name: string } }[];
   lastMessaged: string | null; optedOut: boolean;
+  status: string; statusReason?: string | null; engagementScore: number;
 };
 type ContactList = { id: string; name: string; description?: string; _count?: { members: number } };
 type Template = { id: string; name: string; body: string; category: string; language: string };
@@ -27,7 +30,9 @@ function getBodyVars(body: string): number[] {
 function ContactsPageContent() {
   const [tab, setTab] = useState<"contacts" | "lists">("contacts");
   const [search, setSearch] = useState("");
-  const [optedOutFilter, setOptedOutFilter] = useState<boolean | undefined>();
+  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [blacklistTarget, setBlacklistTarget] = useState<Contact | null>(null);
+  const [blacklistReason, setBlacklistReason] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [showCreateList, setShowCreateList] = useState(false);
   const [activeList, setActiveList] = useState<ContactList | null>(null);
@@ -45,8 +50,8 @@ function ContactsPageContent() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", search, optedOutFilter, selectedNumberId],
-    queryFn: () => api.get("/contacts", { params: { q: search || undefined, optedOut: optedOutFilter, numberId: selectedNumberId } }).then((r) => r.data),
+    queryKey: ["contacts", search, statusFilter, selectedNumberId],
+    queryFn: () => api.get("/contacts", { params: { q: search || undefined, status: statusFilter, numberId: selectedNumberId } }).then((r) => r.data),
     placeholderData: (prev) => prev,
     enabled: !!selectedNumberId,
   });
@@ -85,6 +90,23 @@ function ContactsPageContent() {
   const deleteContact = useMutation({
     mutationFn: (id: string) => api.delete(`/contacts/${id}`),
     onSuccess: () => { toast.success("Contact deleted"); qc.invalidateQueries({ queryKey: ["contacts"] }); },
+  });
+
+  const blacklistContact = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => api.post(`/contacts/${id}/blacklist`, { reason: reason || undefined }),
+    onSuccess: () => {
+      toast.success("Contact blacklisted");
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      setBlacklistTarget(null);
+      setBlacklistReason("");
+    },
+    onError: () => toast.error("Failed to blacklist contact"),
+  });
+
+  const reactivateContact = useMutation({
+    mutationFn: (id: string) => api.post(`/contacts/${id}/reactivate`),
+    onSuccess: () => { toast.success("Contact reactivated"); qc.invalidateQueries({ queryKey: ["contacts"] }); },
+    onError: () => toast.error("Failed to reactivate contact"),
   });
 
   const createList = useMutation({
@@ -232,15 +254,23 @@ function ContactsPageContent() {
                 className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
-            {[{ label: "All", value: undefined }, { label: "Active", value: false }, { label: "Opted Out", value: true }].map(({ label, value }) => (
+            <div className="flex gap-1.5 flex-wrap">
               <button
-                key={label}
-                onClick={() => setOptedOutFilter(value as boolean | undefined)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${optedOutFilter === value ? "bg-primary text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                onClick={() => setStatusFilter(undefined)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${statusFilter === undefined ? "bg-primary text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
               >
-                {label}
+                All
               </button>
-            ))}
+              {CONTACT_STATUSES.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${statusFilter === s ? "bg-primary text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                >
+                  {s.replace("_", " ")}
+                </button>
+              ))}
+            </div>
           </div>
 
           {!isLoading && contacts.length === 0 && (
@@ -289,19 +319,36 @@ function ContactsPageContent() {
                       </td>
                       <td className="px-5 py-4 text-xs text-gray-400">{c.lastMessaged ? formatRelativeTime(c.lastMessaged) : "Never"}</td>
                       <td className="px-5 py-4">
-                        {c.optedOut
-                          ? <span className="flex items-center gap-1 text-xs text-red-600 font-medium"><UserX className="w-3.5 h-3.5" /> Opted Out</span>
-                          : <span className="flex items-center gap-1 text-xs text-green-600 font-medium"><UserCheck className="w-3.5 h-3.5" /> Active</span>}
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(c.status)}`} title={c.statusReason || undefined}>
+                          {c.status.replace("_", " ")}
+                        </span>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1">
-                          {!c.optedOut && (
+                          {c.status === "ACTIVE" && (
                             <button
                               onClick={() => openSendModal(c)}
                               className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
                               title="Send template"
                             >
                               <Send className="w-4 h-4" />
+                            </button>
+                          )}
+                          {c.status === "BLACKLISTED" ? (
+                            <button
+                              onClick={() => reactivateContact.mutate(c.id)}
+                              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Reactivate"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setBlacklistTarget(c)}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Blacklist"
+                            >
+                              <ShieldOff className="w-4 h-4" />
                             </button>
                           )}
                           <button
@@ -421,9 +468,7 @@ function ContactsPageContent() {
                       </td>
                       <td className="px-5 py-3 text-sm font-mono text-gray-600">{c.phone}</td>
                       <td className="px-5 py-3">
-                        {c.optedOut
-                          ? <span className="text-xs text-red-500">Opted Out</span>
-                          : <span className="text-xs text-green-600">Active</span>}
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusColor(c.status)}`}>{c.status.replace("_", " ")}</span>
                       </td>
                     </tr>
                   ))}
@@ -505,6 +550,41 @@ function ContactsPageContent() {
                   {sendMutation.isPending ? "Sending..." : "Send"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BLACKLIST MODAL ── */}
+      {blacklistTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-gray-900">Blacklist Contact</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{blacklistTarget.name} · {blacklistTarget.phone}</p>
+              </div>
+              <button onClick={() => { setBlacklistTarget(null); setBlacklistReason(""); }}><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">This contact will be excluded from all future campaigns until reactivated.</p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason <span className="text-gray-400 font-normal">(optional)</span></label>
+              <input
+                value={blacklistReason}
+                onChange={(e) => setBlacklistReason(e.target.value)}
+                placeholder="e.g. Repeated complaints, invalid number..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+            <div className="flex gap-2 pt-4">
+              <button type="button" onClick={() => { setBlacklistTarget(null); setBlacklistReason(""); }} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
+              <button
+                disabled={blacklistContact.isPending}
+                onClick={() => blacklistContact.mutate({ id: blacklistTarget.id, reason: blacklistReason })}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-70"
+              >
+                {blacklistContact.isPending ? "Blacklisting..." : "Blacklist"}
+              </button>
             </div>
           </div>
         </div>

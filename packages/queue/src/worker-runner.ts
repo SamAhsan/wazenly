@@ -9,7 +9,8 @@ import { createContactImporterWorker } from "./workers/contact-importer.worker";
 import { createFlowWorker } from "./workers/flow.worker";
 import { createNotificationWorker } from "./workers/notification.worker";
 import { createNumberHealthWorker } from "./workers/number-health.worker";
-import { templateSyncQueue, numberHealthCheckQueue } from "./queues";
+import { createContactEngagementWorker } from "./workers/contact-engagement.worker";
+import { templateSyncQueue, numberHealthCheckQueue, contactEngagementQueue } from "./queues";
 import { prisma } from "@wazenly/db";
 
 async function startWorkers() {
@@ -23,6 +24,7 @@ async function startWorkers() {
     createFlowWorker(),
     createNotificationWorker(),
     createNumberHealthWorker(),
+    createContactEngagementWorker(),
   ];
 
   // Schedule hourly template sync for all connected numbers
@@ -44,6 +46,16 @@ async function startWorkers() {
     {
       repeat: { every: 1800000 },
       jobId: "number-health-check-recurring",
+    }
+  );
+
+  // Recompute contact status (Dormant detection) and engagement scores daily.
+  await contactEngagementQueue.add(
+    "check-all-contacts",
+    {},
+    {
+      repeat: { every: 86400000 },
+      jobId: "contact-engagement-recurring",
     }
   );
 

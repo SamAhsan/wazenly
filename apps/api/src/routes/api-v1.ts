@@ -5,7 +5,7 @@ import { prisma } from "@wazenly/db";
 import { requireApiKey, AuthRequest } from "../middleware/auth";
 import { apiRateLimiter } from "../middleware/rate-limiter";
 import { MetaApiService } from "../services/meta.service";
-import { decrypt, normalizePhone } from "@wazenly/shared";
+import { decrypt, normalizePhone, isSuppressed } from "@wazenly/shared";
 import { campaignSenderQueue } from "@wazenly/queue";
 import { CAMPAIGN_BATCH_SIZE } from "@wazenly/shared";
 
@@ -98,6 +98,17 @@ apiV1Router.post("/campaigns", async (req: AuthRequest, res, next) => {
       scheduledAt: z.string().optional(),
     }).parse(req.body);
 
+    const normalizedContacts = body.contacts.map((c) => ({ ...c, phone: normalizePhone(c.phone) }));
+    const matchingContacts = await prisma.contact.findMany({
+      where: { workspaceId: req.workspaceId!, numberId: body.numberId, phone: { in: normalizedContacts.map((c) => c.phone) } },
+      select: { phone: true, status: true },
+    });
+    const statusByPhone = new Map(matchingContacts.map((c) => [c.phone, c.status]));
+    const sendable = normalizedContacts.filter((c) => {
+      const status = statusByPhone.get(c.phone);
+      return !status || !isSuppressed(status);
+    });
+
     const campaign = await prisma.campaign.create({
       data: {
         workspaceId: req.workspaceId!,
@@ -106,14 +117,14 @@ apiV1Router.post("/campaigns", async (req: AuthRequest, res, next) => {
         templateId: body.templateId,
         scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
         status: "DRAFT",
-        totalRecipients: body.contacts.length,
+        totalRecipients: sendable.length,
       },
     });
 
     await prisma.campaignContact.createMany({
-      data: body.contacts.map((c) => ({
+      data: sendable.map((c) => ({
         campaignId: campaign.id,
-        phone: normalizePhone(c.phone),
+        phone: c.phone,
         variables: c.variables || {},
       })),
       skipDuplicates: true,

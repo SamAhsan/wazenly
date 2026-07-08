@@ -6,6 +6,7 @@ import type { MetaWebhookPayload } from "@wazenly/shared";
 import { redisConnection } from "../redis";
 import { findMatchingFlowStart, executeFromNode, resumeWaitingInput } from "../services/flow-engine.service";
 import { notifyUsers, getMembersWithMinRole, wasRecentlyNotified, notifyOnFinalJobFailure } from "../services/notification.service";
+import { recordDeliverySuccess, recordDeliveryFailure } from "../services/contact-status.service";
 import type { WhatsAppNumber, Workspace, Contact } from "@wazenly/db";
 
 interface WebhookJobData {
@@ -144,11 +145,15 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             await upsertDailyAnalytics(number.workspaceId, number.id, "newContacts").catch(() => {});
           }
 
+          // Any inbound message is a sign of life — keeps the contact out of the
+          // dormant-detection worker's "no activity" window.
+          await prisma.contact.update({ where: { id: contact.id }, data: { lastMessaged: new Date() } }).catch(() => {});
+
           // Check opt-out
           if (msg.type === "text" && OPT_OUT_KEYWORDS.includes(msg.text?.body || "")) {
             await prisma.contact.update({
               where: { id: contact.id },
-              data: { optedOut: true, optedOutAt: new Date() },
+              data: { optedOut: true, optedOutAt: new Date(), status: "UNSUBSCRIBED", statusChangedAt: new Date() },
             });
           }
 
@@ -259,6 +264,21 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             await upsertDailyAnalytics(number.workspaceId, number.id, "read").catch(() => {});
           } else if (metaStatus === "failed") {
             await upsertDailyAnalytics(number.workspaceId, number.id, "failed").catch(() => {});
+          }
+
+          // Track delivery outcomes toward each contact's health status.
+          if (metaStatus === "delivered" || metaStatus === "failed") {
+            const relatedMessage = await prisma.message.findFirst({
+              where: { metaMessageId: status.id },
+              select: { contactId: true },
+            });
+            if (relatedMessage?.contactId) {
+              if (metaStatus === "delivered") {
+                await recordDeliverySuccess(relatedMessage.contactId);
+              } else {
+                await recordDeliveryFailure(relatedMessage.contactId, String(status.errors?.[0]?.code || ""));
+              }
+            }
           }
 
           // Update campaign contact status (if this message belongs to a campaign)

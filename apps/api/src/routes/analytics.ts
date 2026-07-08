@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, AuthRequest } from "../middleware/auth";
+import { HARD_SUPPRESSED_STATUSES } from "@wazenly/shared";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth, requireWorkspace);
@@ -104,6 +105,52 @@ analyticsRouter.get("/campaigns", async (req: AuthRequest, res, next) => {
     }));
 
     res.json(enriched);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/analytics/suppression
+analyticsRouter.get("/suppression", async (req: AuthRequest, res, next) => {
+  try {
+    const { from, to, numberId } = req.query as { from?: string; to?: string; numberId?: string };
+    const endDate = to ? new Date(to) : new Date();
+    const startDate = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const baseWhere: Record<string, unknown> = { workspaceId: req.workspaceId! };
+    if (numberId) baseWhere.numberId = numberId;
+
+    const [statusCounts, trendRows, blacklistReasons] = await Promise.all([
+      prisma.contact.groupBy({ by: ["status"], where: baseWhere, _count: true }),
+      prisma.contact.findMany({
+        where: { ...baseWhere, status: { in: [...HARD_SUPPRESSED_STATUSES] }, statusChangedAt: { gte: startDate, lte: endDate } },
+        select: { statusChangedAt: true },
+      }),
+      prisma.contact.groupBy({
+        by: ["statusReason"],
+        where: { ...baseWhere, status: "BLACKLISTED", statusReason: { not: null } },
+        _count: true,
+        orderBy: { _count: { statusReason: "desc" } },
+        take: 5,
+      }),
+    ]);
+
+    const counts: Record<string, number> = {};
+    statusCounts.forEach((s) => { counts[s.status] = s._count; });
+
+    // Bucket new-suppressions by day for a simple trend line
+    const trendByDay = new Map<string, number>();
+    trendRows.forEach((c) => {
+      const day = c.statusChangedAt!.toISOString().slice(0, 10);
+      trendByDay.set(day, (trendByDay.get(day) || 0) + 1);
+    });
+    const trend = Array.from(trendByDay.entries()).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json({
+      counts,
+      trend,
+      topBlacklistReasons: blacklistReasons.map((r) => ({ reason: r.statusReason, count: r._count })),
+    });
   } catch (err) {
     next(err);
   }

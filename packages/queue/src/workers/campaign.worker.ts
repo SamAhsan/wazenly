@@ -1,11 +1,12 @@
 import { Worker, Job } from "bullmq";
 import axios from "axios";
 import { prisma } from "@wazenly/db";
-import { decrypt, QUEUE_NAMES, CAMPAIGN_BATCH_SIZE, META_GRAPH_URL, OPT_OUT_KEYWORDS } from "@wazenly/shared";
+import { decrypt, QUEUE_NAMES, CAMPAIGN_BATCH_SIZE, META_GRAPH_URL, OPT_OUT_KEYWORDS, isSuppressed } from "@wazenly/shared";
 import type { CampaignJobData } from "@wazenly/shared";
 import { redisConnection } from "../redis";
 import { campaignSenderQueue } from "../queues";
 import { notifyUsers, getMembersWithMinRole, notifyOnFinalJobFailure } from "../services/notification.service";
+import { recordDeliveryFailure } from "../services/contact-status.service";
 
 async function sendWhatsAppMessage(
   phoneNumberId: string,
@@ -189,10 +190,29 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
   // Count {{1}}, {{2}}, ... placeholders in the template body
   const placeholderCount = (campaign.template.body.match(/\{\{\d+\}\}/g) || []).length;
 
+  // Final backend-enforced suppression check, right before actually sending — the
+  // create-time filters in campaigns.ts/api-v1.ts are best-effort at row-creation
+  // time, but a contact's status can change afterward (e.g. STOP arrives while a
+  // campaign is queued). This is the last line of defense that can't be bypassed.
+  const contactIds = contacts.map((c) => c.contactId).filter((id): id is string => !!id);
+  const contactsById = contactIds.length
+    ? new Map((await prisma.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, status: true } })).map((c) => [c.id, c.status]))
+    : new Map<string, string>();
+
   let sentCount = 0;
   let failedCount = 0;
 
   for (const cc of contacts) {
+    const contactStatus = cc.contactId ? contactsById.get(cc.contactId) : undefined;
+    if (contactStatus && isSuppressed(contactStatus)) {
+      await prisma.campaignContact.update({
+        where: { id: cc.id },
+        data: { status: "FAILED", failedAt: new Date(), errorMessage: "Contact is suppressed" },
+      });
+      failedCount++;
+      continue;
+    }
+
     try {
       // Only pass variables if the template actually has placeholders
       const rawVars = (cc.variables as Record<string, string>) || {};
@@ -286,6 +306,9 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
           errorMessage: error.response?.data?.error?.message || error.message || "Unknown error",
         },
       });
+      if (cc.contactId) {
+        await recordDeliveryFailure(cc.contactId, metaError?.code ? String(metaError.code) : undefined);
+      }
       failedCount++;
       // Send-time rejections (e.g. "message undeliverable") never reached the webhook's
       // status handler, so daily analytics undercounted failures — only delivery-time

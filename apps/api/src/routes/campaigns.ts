@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { campaignSenderQueue } from "@wazenly/queue";
-import { CAMPAIGN_BATCH_SIZE } from "@wazenly/shared";
+import { CAMPAIGN_BATCH_SIZE, isSuppressed } from "@wazenly/shared";
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth, requireWorkspace);
@@ -92,19 +92,34 @@ campaignsRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, 
       },
     });
 
-    // Add inline contacts if provided
+    // Add inline contacts if provided — raw phone/variable pairs have no
+    // guaranteed Contact row, but where one exists (same workspace+number) its
+    // suppression status must still be honored, same as the contact-list path.
     if (body.contacts?.length) {
-      await prisma.campaignContact.createMany({
-        data: body.contacts.map((c) => ({
-          campaignId: campaign.id,
-          phone: c.phone,
-          variables: c.variables || {},
-        })),
-        skipDuplicates: true,
+      const phones = body.contacts.map((c) => c.phone);
+      const matchingContacts = await prisma.contact.findMany({
+        where: { workspaceId: req.workspaceId!, numberId: body.numberId, phone: { in: phones } },
+        select: { phone: true, status: true },
       });
+      const statusByPhone = new Map(matchingContacts.map((c) => [c.phone, c.status]));
+      const sendable = body.contacts.filter((c) => {
+        const status = statusByPhone.get(c.phone);
+        return !status || !isSuppressed(status);
+      });
+
+      if (sendable.length) {
+        await prisma.campaignContact.createMany({
+          data: sendable.map((c) => ({
+            campaignId: campaign.id,
+            phone: c.phone,
+            variables: c.variables || {},
+          })),
+          skipDuplicates: true,
+        });
+      }
       await prisma.campaign.update({
         where: { id: campaign.id },
-        data: { totalRecipients: body.contacts.length },
+        data: { totalRecipients: sendable.length },
       });
     }
 
@@ -160,6 +175,41 @@ campaignsRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res
   }
 });
 
+// GET /api/campaigns/:id/audience-preview — safety-warning numbers for the
+// launch confirmation screen: how many of the campaign's currently-attached
+// contact-list members would actually be skipped vs. sent to.
+campaignsRouter.get("/:id/audience-preview", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      include: { contactLists: { include: { members: { include: { contact: true } } } } },
+    });
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
+    const seen = new Set<string>();
+    let suppressed = 0;
+    let softFlagged = 0;
+    let sendable = 0;
+
+    for (const list of campaign.contactLists) {
+      for (const member of list.members) {
+        if (seen.has(member.contact.phone)) continue;
+        seen.add(member.contact.phone);
+
+        if (isSuppressed(member.contact.status)) suppressed++;
+        else {
+          sendable++;
+          if (member.contact.status === "DORMANT" || member.contact.status === "FAILED_DELIVERY") softFlagged++;
+        }
+      }
+    }
+
+    res.json({ total: seen.size, suppressed, softFlagged, sendable });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/campaigns/:id/launch
 campaignsRouter.post("/:id/launch", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {
@@ -178,7 +228,7 @@ campaignsRouter.post("/:id/launch", requireRole("MANAGER"), async (req: AuthRequ
 
       for (const list of campaign.contactLists) {
         for (const member of list.members) {
-          if (!member.contact.optedOut) {
+          if (!isSuppressed(member.contact.status)) {
             contactSet.set(member.contact.phone, {
               phone: member.contact.phone,
               variables: { name: member.contact.name.split(" ")[0], ...((member.contact.customFields as object) || {}) },

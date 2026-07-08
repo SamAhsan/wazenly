@@ -76,7 +76,7 @@ const contactSchema = z.object({
 // GET /api/contacts
 contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    const { q, tags, listId, optedOut, numberId, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { q, tags, listId, optedOut, status, numberId, page = "1", limit = "50" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
@@ -84,6 +84,7 @@ contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next
     if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }];
     if (tags) where.tags = { hasEvery: tags.split(",") };
     if (optedOut !== undefined) where.optedOut = optedOut === "true";
+    if (status) where.status = status;
     if (listId) where.listMemberships = { some: { listId } };
 
     const [contacts, total] = await Promise.all([
@@ -159,6 +160,45 @@ contactsRouter.put("/:id", requireRole("AGENT"), async (req: AuthRequest, res, n
 contactsRouter.delete("/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
     await prisma.contact.deleteMany({ where: { id: req.params.id, workspaceId: req.workspaceId! } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/contacts/:id/blacklist — manual, permanent-until-reversed suppression,
+// distinct from a customer-initiated STOP (Unsubscribed).
+contactsRouter.post("/:id/blacklist", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const { reason } = z.object({ reason: z.string().optional() }).parse(req.body);
+    const result = await prisma.contact.updateMany({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      data: { status: "BLACKLISTED", statusReason: reason, statusChangedAt: new Date(), statusChangedBy: req.userId! },
+    });
+    if (!result.count) return res.status(404).json({ error: "Contact not found" });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/contacts/:id/reactivate — clears any status (Blacklisted, Unsubscribed,
+// Invalid, Dormant, Failed-Delivery) back to Active.
+contactsRouter.post("/:id/reactivate", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const result = await prisma.contact.updateMany({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      data: {
+        status: "ACTIVE",
+        statusReason: null,
+        statusChangedAt: new Date(),
+        statusChangedBy: req.userId!,
+        consecutiveFailures: 0,
+        optedOut: false,
+        optedOutAt: null,
+      },
+    });
+    if (!result.count) return res.status(404).json({ error: "Contact not found" });
     res.json({ success: true });
   } catch (err) {
     next(err);
