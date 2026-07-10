@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ReactFlow, {
   addEdge, Background, Controls, MiniMap, useEdgesState, useNodesState,
@@ -85,8 +85,14 @@ function FlowEditorPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew]);
 
+  // Hydrate local state from the server exactly once per flow — not on every
+  // refetch. refetchFlow() runs after Activate/Pause just to update the status
+  // badge; re-running this sync then would silently overwrite an unsaved name
+  // or canvas edit with the last-saved server copy.
+  const hydratedFlowId = useRef<string | null>(null);
   useEffect(() => {
-    if (flow) {
+    if (flow && hydratedFlowId.current !== flow.id) {
+      hydratedFlowId.current = flow.id;
       setFlowName(flow.name);
       setFlowNumberId(flow.numberId || "");
       if (flow.nodes?.length) {
@@ -152,6 +158,13 @@ function FlowEditorPageContent() {
     setNodes((nds) => nds.map((n) => (n.id === selectedNodeId ? { ...n, data: { ...n.data, label, config } } : n)));
     setSelectedNodeId(null);
     toast.success("Node updated — remember to Save the flow");
+  }
+
+  function handleDeleteNode() {
+    setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
+    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
+    setSelectedNodeId(null);
+    toast.success("Node deleted — remember to Save the flow");
   }
 
   return (
@@ -252,6 +265,7 @@ function FlowEditorPageContent() {
             currentFlowId={isNew ? undefined : id}
             onClose={() => setSelectedNodeId(null)}
             onSave={handleSaveNodeConfig}
+            onDelete={handleDeleteNode}
           />
         )}
       </div>

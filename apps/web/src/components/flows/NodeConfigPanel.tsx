@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 import type { Node } from "reactflow";
 import { TriggerConfig, type TriggerConfigData } from "./config/TriggerConfig";
 import { MessageConfig, type MessageConfigData } from "./config/MessageConfig";
@@ -25,12 +25,14 @@ export function NodeConfigPanel({
   currentFlowId,
   onClose,
   onSave,
+  onDelete,
 }: {
   node: Node<NodeData>;
   allNodes: Node<NodeData>[];
   currentFlowId?: string;
   onClose: () => void;
   onSave: (label: string, config: NodeConfig) => void;
+  onDelete: () => void;
 }) {
   const [label, setLabel] = useState(node.data.label);
   const [config, setConfig] = useState<NodeConfig>((node.data.config as NodeConfig) || ({} as NodeConfig));
@@ -73,12 +75,20 @@ export function NodeConfigPanel({
         )}
       </div>
 
-      <div className="p-4 border-t border-gray-100 flex-shrink-0">
+      <div className="p-4 border-t border-gray-100 flex-shrink-0 space-y-2">
         <button
           onClick={() => onSave(label, config)}
           className="w-full bg-primary text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-primary-600"
         >
           Save node
+        </button>
+        <button
+          onClick={() => {
+            if (confirm("Delete this node? This can't be undone.")) onDelete();
+          }}
+          className="w-full flex items-center justify-center gap-2 text-red-600 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
+        >
+          <Trash2 className="w-4 h-4" /> Delete node
         </button>
       </div>
     </div>

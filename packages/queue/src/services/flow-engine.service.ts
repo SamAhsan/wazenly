@@ -446,39 +446,73 @@ export async function executeFromNode(ctx: ExecCtx, nodeId: string | null): Prom
   await clearSession(ctx.contact.id, ctx.number.id);
 }
 
-function matchesTrigger(config: TriggerConfig, messageText: string | undefined, isFirstMessage: boolean, isReturningCustomer: boolean): boolean {
+// Specificity determines which trigger wins when more than one matches the same
+// message (e.g. keywords "interested" and "not interested" both matching "not
+// interested") — the longer/more precise match wins instead of whichever flow
+// happened to be created first. Catch-all match types always lose to a real
+// keyword match.
+function matchesTrigger(
+  config: TriggerConfig,
+  messageText: string | undefined,
+  isFirstMessage: boolean,
+  isReturningCustomer: boolean
+): { matched: boolean; specificity: number } {
   const text = (messageText || "").trim();
   const lowerText = text.toLowerCase();
-  const keywords = (config.keywords || []).map((k) => k.toLowerCase());
+  const keywords = (config.keywords || []).map((k) => k.toLowerCase().trim()).filter(Boolean);
+
+  const longestMatch = (test: (k: string) => boolean): number => {
+    const lengths = keywords.filter(test).map((k) => k.length);
+    return lengths.length ? Math.max(...lengths) : -1;
+  };
 
   switch (config.matchType) {
     case "any_message":
-      return true;
+      return { matched: true, specificity: 0 };
     case "first_message":
-      return isFirstMessage;
+      return { matched: isFirstMessage, specificity: 0 };
     case "returning_customer":
-      return isReturningCustomer;
-    case "exact":
-      return keywords.includes(lowerText);
-    case "contains":
-      return keywords.some((k) => lowerText.includes(k));
-    case "starts_with":
-      return keywords.some((k) => lowerText.startsWith(k));
-    case "regex":
-      return keywords.some((pattern) => {
+      return { matched: isReturningCustomer, specificity: 0 };
+    case "exact": {
+      const s = longestMatch((k) => lowerText === k);
+      return { matched: s >= 0, specificity: s + 1000 };
+    }
+    case "regex": {
+      const s = longestMatch((pattern) => {
         try {
           return new RegExp(pattern, "i").test(text);
         } catch {
           return false;
         }
       });
+      return { matched: s >= 0, specificity: s + 500 };
+    }
+    case "starts_with": {
+      const s = longestMatch((k) => lowerText.startsWith(k));
+      return { matched: s >= 0, specificity: s };
+    }
+    case "contains": {
+      const s = longestMatch((k) => lowerText.includes(k));
+      return { matched: s >= 0, specificity: s };
+    }
     case "keyword":
-    default:
-      return keywords.some((k) => lowerText.split(/\s+/).includes(k));
+    default: {
+      // Whole word/phrase match (word-boundary), not a single-token equality —
+      // so multi-word keywords like "not interested" can actually match.
+      const s = longestMatch((k) => {
+        const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`\\b${escaped}\\b`).test(lowerText);
+      });
+      return { matched: s >= 0, specificity: s };
+    }
   }
 }
 
-/** Finds the first ACTIVE flow (scoped to this number) whose trigger node matches the inbound message. */
+/**
+ * Finds the ACTIVE flow (scoped to this number) whose trigger node matches the
+ * inbound message. When multiple triggers across multiple flows match the same
+ * message, the most specific match wins (see matchesTrigger's specificity).
+ */
 export async function findMatchingFlowStart(
   workspaceId: string,
   numberId: string,
@@ -493,6 +527,8 @@ export async function findMatchingFlowStart(
 
   console.log(`[FlowEngine] Checking ${flows.length} ACTIVE flow(s) scoped to number ${numberId} (or unscoped) in workspace ${workspaceId}`);
 
+  const candidates: { flow: Flow; triggerNode: FlowNode; specificity: number }[] = [];
+
   for (const flow of flows) {
     const triggerNodes = await prisma.flowNode.findMany({ where: { flowId: flow.id, type: "trigger" } });
     if (triggerNodes.length === 0) {
@@ -501,17 +537,21 @@ export async function findMatchingFlowStart(
     }
     for (const triggerNode of triggerNodes) {
       const config = getNodeConfig<TriggerConfig>(triggerNode.data);
-      const matched = matchesTrigger(config, messageText, isFirstMessage, isReturningCustomer);
+      const { matched, specificity } = matchesTrigger(config, messageText, isFirstMessage, isReturningCustomer);
       console.log(
-        `[FlowEngine] Flow "${flow.name}" trigger ${triggerNode.id} — matchType=${config.matchType} keywords=${JSON.stringify(config.keywords || [])} → ${matched ? "MATCH" : "no match"}`
+        `[FlowEngine] Flow "${flow.name}" trigger ${triggerNode.id} — matchType=${config.matchType} keywords=${JSON.stringify(config.keywords || [])} → ${matched ? `MATCH (specificity ${specificity})` : "no match"}`
       );
-      if (matched) {
-        const startNodeId = await getFirstEdgeTarget(flow.id, triggerNode.id);
-        return { flow, startNodeId };
-      }
+      if (matched) candidates.push({ flow, triggerNode, specificity });
     }
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => b.specificity - a.specificity);
+  const best = candidates[0];
+  console.log(`[FlowEngine] Winning trigger: flow "${best.flow.name}" (specificity ${best.specificity})`);
+  const startNodeId = await getFirstEdgeTarget(best.flow.id, best.triggerNode.id);
+  return { flow: best.flow, startNodeId };
 }
 
 function validateInput(config: InputConfig, value: string): boolean {
