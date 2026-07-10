@@ -73,19 +73,29 @@ const contactSchema = z.object({
   customFields: z.record(z.unknown()).optional(),
 });
 
+// Shared filter-building used by both the list endpoint and the export
+// endpoint, so a filter added to one always applies to the other.
+function buildContactWhere(req: AuthRequest): Record<string, unknown> {
+  const { q, tags, listId, optedOut, status, replyIntent, numberId } = req.query as Record<string, string>;
+
+  const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
+  if (numberId) where.numberId = numberId;
+  if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }];
+  if (tags) where.tags = { hasEvery: tags.split(",") };
+  if (optedOut !== undefined) where.optedOut = optedOut === "true";
+  if (status) where.status = status;
+  if (replyIntent) where.replyIntent = replyIntent;
+  if (listId) where.listMemberships = { some: { listId } };
+  return where;
+}
+
 // GET /api/contacts
 contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    const { q, tags, listId, optedOut, status, numberId, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const { page = "1", limit = "50" } = req.query as Record<string, string>;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where: Record<string, unknown> = { workspaceId: req.workspaceId! };
-    if (numberId) where.numberId = numberId;
-    if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q } }, { email: { contains: q, mode: "insensitive" } }];
-    if (tags) where.tags = { hasEvery: tags.split(",") };
-    if (optedOut !== undefined) where.optedOut = optedOut === "true";
-    if (status) where.status = status;
-    if (listId) where.listMemberships = { some: { listId } };
+    const where = buildContactWhere(req);
 
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
@@ -99,6 +109,50 @@ contactsRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next
     ]);
 
     res.json({ data: contacts, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/contacts/export — same filters as the list endpoint, streamed as .xlsx.
+contactsRouter.get("/export", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+  try {
+    const where = buildContactWhere(req);
+    const contacts = await prisma.contact.findMany({ where, orderBy: { createdAt: "desc" } });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Contacts");
+    sheet.columns = [
+      { header: "Name", key: "name", width: 24 },
+      { header: "Phone", key: "phone", width: 18 },
+      { header: "Email", key: "email", width: 24 },
+      { header: "Status", key: "status", width: 16 },
+      { header: "Reply Intent", key: "replyIntent", width: 16 },
+      { header: "Last Reply Sample", key: "replyIntentSample", width: 40 },
+      { header: "Tags", key: "tags", width: 20 },
+      { header: "Engagement Score", key: "engagementScore", width: 16 },
+      { header: "Last Messaged", key: "lastMessaged", width: 20 },
+      { header: "Created At", key: "createdAt", width: 20 },
+    ];
+    for (const c of contacts) {
+      sheet.addRow({
+        name: c.name,
+        phone: c.phone,
+        email: c.email || "",
+        status: c.status,
+        replyIntent: c.replyIntent,
+        replyIntentSample: c.replyIntentSample || "",
+        tags: c.tags.join(", "),
+        engagementScore: c.engagementScore,
+        lastMessaged: c.lastMessaged ? c.lastMessaged.toISOString() : "",
+        createdAt: c.createdAt.toISOString(),
+      });
+    }
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="contacts-export.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
   } catch (err) {
     next(err);
   }

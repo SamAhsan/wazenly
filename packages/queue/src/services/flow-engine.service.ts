@@ -1,7 +1,7 @@
 import axios from "axios";
 import { prisma } from "@wazenly/db";
 import type { Contact, Flow, FlowNode, WhatsAppNumber, Workspace } from "@wazenly/db";
-import { decrypt, META_GRAPH_URL } from "@wazenly/shared";
+import { decrypt, META_GRAPH_URL, bestKeywordMatchLength } from "@wazenly/shared";
 import { flowExecutorQueue, campaignSenderQueue } from "../queues";
 
 export interface ExecCtx {
@@ -497,12 +497,7 @@ function matchesTrigger(
     }
     case "keyword":
     default: {
-      // Whole word/phrase match (word-boundary), not a single-token equality —
-      // so multi-word keywords like "not interested" can actually match.
-      const s = longestMatch((k) => {
-        const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        return new RegExp(`\\b${escaped}\\b`).test(lowerText);
-      });
+      const s = bestKeywordMatchLength(text, keywords);
       return { matched: s >= 0, specificity: s };
     }
   }

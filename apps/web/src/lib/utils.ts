@@ -52,6 +52,9 @@ export function statusColor(status: string): string {
     INVALID: "bg-red-100 text-red-700",
     DORMANT: "bg-yellow-100 text-yellow-700",
     FAILED_DELIVERY: "bg-orange-100 text-orange-700",
+    INTERESTED: "bg-green-100 text-green-700",
+    NOT_INTERESTED: "bg-red-100 text-red-700",
+    UNKNOWN: "bg-gray-100 text-gray-500",
   };
   return map[status] || "bg-gray-100 text-gray-700";
 }

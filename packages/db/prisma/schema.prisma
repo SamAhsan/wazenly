@@ -297,6 +297,12 @@ enum ContactStatus {
   FAILED_DELIVERY
 }
 
+enum ReplyIntent {
+  UNKNOWN
+  INTERESTED
+  NOT_INTERESTED
+}
+
 model Contact {
   id                  String        @id @default(cuid())
   workspaceId         String
@@ -315,6 +321,9 @@ model Contact {
   engagementScore     Int           @default(50)
   consecutiveFailures Int           @default(0)
   lastMessaged        DateTime?
+  replyIntent         ReplyIntent   @default(UNKNOWN)
+  replyIntentAt       DateTime?
+  replyIntentSample   String?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -331,6 +340,7 @@ model Contact {
   @@index([numberId])
   @@index([phone])
   @@index([status])
+  @@index([replyIntent])
 }
 
 model ContactList {

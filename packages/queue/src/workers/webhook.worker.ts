@@ -7,6 +7,7 @@ import { redisConnection } from "../redis";
 import { findMatchingFlowStart, executeFromNode, resumeWaitingInput } from "../services/flow-engine.service";
 import { notifyUsers, getMembersWithMinRole, wasRecentlyNotified, notifyOnFinalJobFailure } from "../services/notification.service";
 import { recordDeliverySuccess, recordDeliveryFailure } from "../services/contact-status.service";
+import { classifyReplyIntent } from "../services/reply-intent.service";
 import type { WhatsAppNumber, Workspace, Contact } from "@wazenly/db";
 
 interface WebhookJobData {
@@ -149,12 +150,28 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
           // dormant-detection worker's "no activity" window.
           await prisma.contact.update({ where: { id: contact.id }, data: { lastMessaged: new Date() } }).catch(() => {});
 
-          // Check opt-out
-          if (msg.type === "text" && OPT_OUT_KEYWORDS.includes(msg.text?.body || "")) {
-            await prisma.contact.update({
-              where: { id: contact.id },
-              data: { optedOut: true, optedOutAt: new Date(), status: "UNSUBSCRIBED", statusChangedAt: new Date() },
-            });
+          // Check opt-out, and otherwise classify reply interest (flag-only --
+          // does not affect campaign suppression, see isSuppressed()).
+          if (msg.type === "text") {
+            const text = msg.text?.body || "";
+            const sample = text.slice(0, 500);
+            if (OPT_OUT_KEYWORDS.includes(text)) {
+              await prisma.contact.update({
+                where: { id: contact.id },
+                data: {
+                  optedOut: true, optedOutAt: new Date(), status: "UNSUBSCRIBED", statusChangedAt: new Date(),
+                  replyIntent: "NOT_INTERESTED", replyIntentAt: new Date(), replyIntentSample: sample,
+                },
+              });
+            } else {
+              const intent = classifyReplyIntent(text);
+              if (intent) {
+                await prisma.contact.update({
+                  where: { id: contact.id },
+                  data: { replyIntent: intent, replyIntentAt: new Date(), replyIntentSample: sample },
+                });
+              }
+            }
           }
 
           // Upsert conversation

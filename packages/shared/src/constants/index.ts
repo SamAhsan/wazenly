@@ -34,6 +34,22 @@ export const OPT_OUT_KEYWORDS = [
   "stop", "stopall", "unsubscribe", "cancel", "end", "quit",
 ];
 
+// Rule-based reply-interest classification (v1 heuristic, no AI) -- tunable.
+// Single-word "yes"/"no" are intentionally included since WhatsApp campaigns
+// commonly end in a yes/no call-to-action.
+export const INTERESTED_KEYWORDS = [
+  "interested", "yes", "yes please", "sure", "sounds good",
+  "im interested", "i'm interested", "tell me more", "more info", "please share",
+  "count me in", "sign me up", "lets do it", "let's do it", "i want this",
+  "definitely", "absolutely",
+];
+
+export const NOT_INTERESTED_KEYWORDS = [
+  "not interested", "no thanks", "no thank you", "not now",
+  "not right now", "maybe later", "not for me", "no interest", "dont need",
+  "don't need", "no need", "not needed", "no", "nah", "not really", "remove me",
+];
+
 export const ROLES_HIERARCHY = {
   OWNER: 5,
   ADMIN: 4,

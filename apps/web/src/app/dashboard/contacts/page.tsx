@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw, Download } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials, statusColor } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
@@ -12,12 +12,14 @@ import { RoleGuard } from "@/components/layout/role-guard";
 import { ImportWizard } from "@/components/contacts/ImportWizard";
 
 const CONTACT_STATUSES = ["ACTIVE", "UNSUBSCRIBED", "BLACKLISTED", "INVALID", "DORMANT", "FAILED_DELIVERY"];
+const REPLY_INTENTS = ["INTERESTED", "NOT_INTERESTED", "UNKNOWN"];
 
 type Contact = {
   id: string; name: string; email?: string; phone: string; tags: string[];
   listMemberships: { list: { id: string; name: string } }[];
   lastMessaged: string | null; optedOut: boolean;
   status: string; statusReason?: string | null; engagementScore: number;
+  replyIntent: string; replyIntentSample?: string | null;
 };
 type ContactList = { id: string; name: string; description?: string; _count?: { members: number } };
 type Template = { id: string; name: string; body: string; category: string; language: string };
@@ -31,6 +33,7 @@ function ContactsPageContent() {
   const [tab, setTab] = useState<"contacts" | "lists">("contacts");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [replyIntentFilter, setReplyIntentFilter] = useState<string | undefined>();
   const [blacklistTarget, setBlacklistTarget] = useState<Contact | null>(null);
   const [blacklistReason, setBlacklistReason] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -50,8 +53,8 @@ function ContactsPageContent() {
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["contacts", search, statusFilter, selectedNumberId],
-    queryFn: () => api.get("/contacts", { params: { q: search || undefined, status: statusFilter, numberId: selectedNumberId } }).then((r) => r.data),
+    queryKey: ["contacts", search, statusFilter, replyIntentFilter, selectedNumberId],
+    queryFn: () => api.get("/contacts", { params: { q: search || undefined, status: statusFilter, replyIntent: replyIntentFilter, numberId: selectedNumberId } }).then((r) => r.data),
     placeholderData: (prev) => prev,
     enabled: !!selectedNumberId,
   });
@@ -155,6 +158,28 @@ function ContactsPageContent() {
   const contacts: Contact[] = data?.data || [];
   const listContactsData: Contact[] = listContacts?.data || [];
 
+  const [exporting, setExporting] = useState(false);
+  async function exportContacts() {
+    setExporting(true);
+    try {
+      const res = await api.get("/contacts/export", {
+        params: { q: search || undefined, status: statusFilter, replyIntent: replyIntentFilter, numberId: selectedNumberId },
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "contacts-export.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Failed to export contacts");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function openSendModal(c: Contact) {
     if (!selectedNumberId) { toast.error("Select a WhatsApp number from the top bar first"); return; }
     setSendContact(c);
@@ -190,6 +215,15 @@ function ContactsPageContent() {
         </div>
         {selectedNumberId && (
           <div className="flex gap-2">
+            {tab === "contacts" && (
+              <button
+                onClick={exportContacts}
+                disabled={exporting}
+                className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-70"
+              >
+                <Download className="w-4 h-4" /> {exporting ? "Exporting..." : "Export"}
+              </button>
+            )}
             <button
               onClick={() => setShowImportWizard(true)}
               className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
@@ -271,6 +305,17 @@ function ContactsPageContent() {
                 </button>
               ))}
             </div>
+            <select
+              value={replyIntentFilter || ""}
+              onChange={(e) => setReplyIntentFilter(e.target.value || undefined)}
+              title="Filter by reply intent"
+              className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="">Any Reply Intent</option>
+              {REPLY_INTENTS.map((r) => (
+                <option key={r} value={r}>{r.replace("_", " ")}</option>
+              ))}
+            </select>
           </div>
 
           {!isLoading && contacts.length === 0 && (
@@ -294,6 +339,7 @@ function ContactsPageContent() {
                     <th className="text-left px-5 py-3.5">Lists</th>
                     <th className="text-left px-5 py-3.5">Last Messaged</th>
                     <th className="text-left px-5 py-3.5">Status</th>
+                    <th className="text-left px-5 py-3.5">Reply Intent</th>
                     <th className="text-right px-5 py-3.5">Actions</th>
                   </tr>
                 </thead>
@@ -321,6 +367,14 @@ function ContactsPageContent() {
                       <td className="px-5 py-4">
                         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(c.status)}`} title={c.statusReason || undefined}>
                           {c.status.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(c.replyIntent)}`}
+                          title={c.replyIntentSample ? `"${c.replyIntentSample}"` : "No reply classified yet"}
+                        >
+                          {c.replyIntent.replace("_", " ")}
                         </span>
                       </td>
                       <td className="px-5 py-4">
