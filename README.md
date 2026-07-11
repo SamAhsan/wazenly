@@ -419,7 +419,9 @@ server {
 | `SMTP_USER` | — | SMTP username |
 | `SMTP_PASS` | — | SMTP password / app password |
 | `NEXT_PUBLIC_APP_URL` | ✅ | Public URL of Next.js frontend |
-| `API_URL` | ✅ | Internal URL of Express API |
+| `NEXT_PUBLIC_API_URL` | ✅ | Browser-facing API base (usually `<NEXT_PUBLIC_APP_URL>/api`) |
+| `API_URL` | ✅ | Internal (localhost) URL of Express API, used server-side |
+| `CORS_ORIGIN` | ✅ | Allowed browser origin(s) for the API, comma-separated |
 | `PORT` | — | API port (default: 4000) |
 
 ---

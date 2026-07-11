@@ -123,6 +123,11 @@ export default function InboxPage() {
     },
   });
 
+  const markReadMutation = useMutation({
+    mutationFn: (id: string) => api.patch(`/conversations/${id}/read`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+
   const noteMutation = useMutation({
     mutationFn: () => api.post(`/conversations/${selectedId}/notes`, { body: noteText }),
     onSuccess: () => {
@@ -140,6 +145,7 @@ export default function InboxPage() {
     setSelectedId(id);
     setShowMobileChat(true);
     queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+    markReadMutation.mutate(id);
   }
 
   function goBackToList() {

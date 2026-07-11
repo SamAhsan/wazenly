@@ -4,9 +4,9 @@ This document covers everything you need to configure Meta webhooks for Wazenly.
 
 ---
 
-## 1. Webhook URLs
+## 1. Webhook URL
 
-The backend exposes two webhook endpoints per phone number. Both are in:
+The backend exposes **one webhook endpoint, shared by every connected number**. Defined in:
 
 ```
 apps/api/src/routes/webhooks.ts
@@ -15,7 +15,7 @@ apps/api/src/routes/webhooks.ts
 ### Verification endpoint (GET)
 
 ```
-GET https://wazenly-api.homestudy.online/api/webhooks/meta/:phoneNumberId
+GET https://wazenlyapp.com/api/webhooks/meta
 ```
 
 Meta calls this once when you save the webhook URL in the developer console. It must return the `hub.challenge` value within 3 seconds.
@@ -23,42 +23,29 @@ Meta calls this once when you save the webhook URL in the developer console. It 
 ### Event endpoint (POST)
 
 ```
-POST https://wazenly-api.homestudy.online/api/webhooks/meta/:phoneNumberId
+POST https://wazenlyapp.com/api/webhooks/meta
 ```
 
-Meta sends all events here. The server responds `200 EVENT_RECEIVED` immediately and queues the payload for async processing via `webhookProcessorQueue` (Redis/BullMQ).
+Meta sends all events here, for every connected number in the app — the server identifies which number an event belongs to from the payload itself (`value.metadata.phone_number_id`), not from the URL. The server responds `200 EVENT_RECEIVED` immediately and queues the payload for async processing via `webhookProcessorQueue` (Redis/BullMQ).
 
-**Replace `:phoneNumberId`** with the actual Phone Number ID from Meta Business Manager. This is the same value you entered when connecting the number in Wazenly Settings → Numbers.
-
-Example for Phone Number ID `1219982647857854`:
-
-```
-https://wazenly-api.homestudy.online/api/webhooks/meta/1219982647857854
-```
+There is no per-number path segment — do not append a phone number ID to this URL.
 
 ---
 
 ## 2. Verify Token
 
-The verify token is stored per-number in the database column `webhookVerifyToken` on the `WhatsAppNumber` model.
+Verification is checked against a **single, global** token: the `WHATSAPP_WEBHOOK_VERIFY_TOKEN` environment variable (see `apps/api/src/routes/webhooks.ts`). Set it once in `.env` and use the same value for every number — it is not per-number.
 
-When you connect a number in Wazenly (Settings → Numbers → Connect Number), the backend auto-generates this token and stores it. You never set it manually in `.env`.
+(The `WhatsAppNumber.webhookVerifyToken` database column exists but is not read by the verification endpoint above; don't use it for this step.)
 
-To find the token for an existing number, run on the server:
+To view or generate the token:
 
 ```bash
 cd /var/www/wazenly
-export $(cat .env | grep -v '^#' | xargs)
-node -e "
-require('dotenv').config();
-const { PrismaClient } = require('./packages/db/dist/index.js');
-const p = new PrismaClient();
-p.whatsAppNumber.findMany({ select: { phoneNumberId: true, displayName: true, webhookVerifyToken: true } })
-  .then(ns => { console.log(JSON.stringify(ns, null, 2)); process.exit(0); });
-"
+grep WHATSAPP_WEBHOOK_VERIFY_TOKEN .env
+# If missing, generate one and add it to .env:
+node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 ```
-
-The `webhookVerifyToken` value is what you paste into Meta's "Verify token" field.
 
 ---
 
@@ -71,14 +58,15 @@ The `webhookVerifyToken` value is what you paste into Meta's "Verify token" fiel
 3. In the left sidebar: **WhatsApp → Configuration**
 4. Under **Webhook**, click **Edit**
 5. Fill in:
-   - **Callback URL**: `https://wazenly-api.homestudy.online/api/webhooks/meta/{phoneNumberId}`
-   - **Verify token**: the `webhookVerifyToken` from the database (step above)
+   - **Callback URL**: `https://wazenlyapp.com/api/webhooks/meta`
+   - **Verify token**: the `WHATSAPP_WEBHOOK_VERIFY_TOKEN` value from `.env` (step above)
 6. Click **Verify and save**
 7. Meta will send a GET request to your URL. If verification fails, check:
    - Nginx is running: `systemctl status nginx`
    - API is running: `pm2 list`
-   - The phoneNumberId in the URL matches the database record
-   - The verify token matches exactly (no trailing spaces)
+   - The verify token matches `.env` exactly (no trailing spaces)
+
+This is a one-time, app-level setup — you do **not** need to repeat it per number. Once set, every connected WhatsApp number's events flow through this same URL.
 
 ### Subscribe to webhook fields
 
@@ -100,9 +88,9 @@ Click **Subscribe** next to each field.
 ## 4. How Webhook Events Are Processed
 
 ```
-Meta → POST /api/webhooks/meta/:phoneNumberId
+Meta → POST /api/webhooks/meta
          ↓
-    Queue: webhookProcessorQueue (BullMQ/Redis)
+    Queue: webhookProcessorQueue (BullMQ/Redis), one job per phoneNumberId found in the payload
          ↓
     packages/queue/src/workers/webhook.worker.ts
          ↓
@@ -120,7 +108,7 @@ Meta → POST /api/webhooks/meta/:phoneNumberId
 - Creates or upserts the Contact record
 - Creates or upserts the Conversation record
 - Saves the Message record with direction=INBOUND
-- Checks for opt-out keywords (STOP, UNSUBSCRIBE, etc.)
+- Checks for opt-out keywords (STOP, UNSUBSCRIBE, etc.) and classifies reply interest (Interested/Not Interested)
 - Increments `DailyAnalytics.inbound` and optionally `newContacts`
 
 **Status updates** (`value.statuses` array):
@@ -138,12 +126,12 @@ For campaign messages, also updates `CampaignContact` status and recalculates ca
 ### Step 1: Verify the API is reachable
 
 ```bash
-curl -s "https://wazenly-api.homestudy.online/api/webhooks/meta/YOUR_PHONE_NUMBER_ID?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=test123"
+curl -s "https://wazenlyapp.com/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=test123"
 # Should return: test123
 ```
 
-If this fails with 404, check nginx config (`cat /etc/nginx/sites-enabled/wazenly-api.homestudy.online`).
-If it returns "Invalid verify token", the token doesn't match the database.
+If this fails with 404, check nginx config (`cat /etc/nginx/sites-enabled/wazenlyapp.com`).
+If it returns "Invalid verify token", the token doesn't match `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in `.env`.
 
 ### Step 2: Send a test message
 
@@ -188,7 +176,7 @@ Open Wazenly → Inbox. The inbound message should appear. The conversation shou
 
 ### "Invalid verify token" from Meta
 
-The token you entered in Meta does not match `webhookVerifyToken` in the database. Re-fetch the token using the Node command in section 2.
+The token you entered in Meta does not match `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in `.env`. Re-check with `grep WHATSAPP_WEBHOOK_VERIFY_TOKEN .env` on the server.
 
 ### Webhook verified but messages not appearing
 
@@ -214,10 +202,13 @@ These variables must be set in `/var/www/wazenly/.env` on the server:
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string (default: `redis://localhost:6379`) |
-| `JWT_SECRET` | Same value as `NEXTAUTH_SECRET` |
-| `NEXTAUTH_SECRET` | NextAuth signing secret |
-| `NEXTAUTH_URL` | Frontend URL (e.g. `https://wazenly.homestudy.online`) |
+| `NEXTAUTH_SECRET` | NextAuth/JWT signing secret — read directly by both `apps/web` and `apps/api` |
+| `NEXTAUTH_URL` | Frontend URL (e.g. `https://wazenlyapp.com`) |
 | `ENCRYPTION_KEY` | 32-char AES key for storing WhatsApp access tokens |
-| `NEXT_PUBLIC_API_URL` | API URL seen by the browser (e.g. `https://wazenly-api.homestudy.online/api`) |
+| `WEBHOOK_BASE_URL` | Public base URL Meta can reach (e.g. `https://wazenlyapp.com`) |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Single verify token used for every number (see section 2) |
+| `NEXT_PUBLIC_APP_URL` | Public URL of the web app (e.g. `https://wazenlyapp.com`) |
+| `NEXT_PUBLIC_API_URL` | API URL seen by the browser (e.g. `https://wazenlyapp.com/api`) |
+| `CORS_ORIGIN` | Allowed browser origin(s) for the API, comma-separated |
 
-The webhook verify token and Meta access tokens are stored **in the database**, not in `.env`. You set them via the Wazenly UI (Settings → Numbers).
+Meta access tokens are stored **in the database**, not in `.env` — you set them via the Wazenly UI (Settings → Numbers).
