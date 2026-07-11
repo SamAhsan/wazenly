@@ -31,8 +31,8 @@ export function Nav() {
 
   return (
     <header
-      className={`sticky top-0 z-50 transition-all duration-300 ${
-        scrolled ? "bg-[#0f1117]/80 backdrop-blur-xl border-b border-white/5 shadow-lg shadow-black/10" : "bg-transparent"
+      className={`sticky top-0 z-50 bg-[#0f1117] border-b transition-shadow duration-300 ${
+        scrolled ? "border-white/10 shadow-lg shadow-black/20" : "border-white/5"
       }`}
     >
       <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">

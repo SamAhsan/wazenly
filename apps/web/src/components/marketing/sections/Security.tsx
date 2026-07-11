@@ -1,40 +1,52 @@
-import { BadgeCheck, ShieldCheck, Lock, KeyRound, FileLock2 } from "lucide-react";
+import { ShieldCheck, CheckCircle2 } from "lucide-react";
 import { Reveal } from "../Reveal";
 
-const ITEMS = [
-  { icon: BadgeCheck, title: "Official Meta Platform", desc: "Built entirely on the official WhatsApp Business Cloud API — no unofficial or gray-market integrations." },
-  { icon: ShieldCheck, title: "Secure APIs", desc: "Every API request is authenticated and scoped to your workspace." },
-  { icon: Lock, title: "Workspace Isolation", desc: "Each WhatsApp number's contacts, campaigns, and data are fully isolated by design." },
-  { icon: KeyRound, title: "Role-Based Access", desc: "Owner, Admin, Manager, and Agent roles control exactly who can do what." },
-  { icon: FileLock2, title: "Encrypted Communication", desc: "Access tokens and sensitive credentials are encrypted at rest." },
+const POINTS = [
+  "Built entirely on the official Meta WhatsApp Business Cloud API",
+  "Every API request authenticated and scoped to your workspace",
+  "Each connected WhatsApp number's data fully isolated by design",
+  "Role-based access — Owner, Admin, Manager, Agent",
+  "Access tokens and credentials encrypted at rest",
 ];
+
+function ShieldIllustration() {
+  return (
+    <div className="relative w-full h-64 sm:h-72 flex items-center justify-center">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="absolute rounded-full border border-primary/20"
+          style={{ width: 140 + i * 60, height: 140 + i * 60 }}
+        />
+      ))}
+      <div className="relative w-28 h-28 rounded-[2rem] bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-xl shadow-primary/20">
+        <ShieldCheck className="w-14 h-14 text-white" />
+      </div>
+    </div>
+  );
+}
 
 export function Security() {
   return (
-    <section className="bg-[#f6f8fa] py-20 sm:py-28">
-      <div className="max-w-7xl mx-auto px-5 sm:px-8">
-        <Reveal>
-          <div className="text-center max-w-2xl mx-auto mb-16">
-            <p className="text-sm font-semibold text-primary mb-3">Enterprise Security</p>
-            <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 tracking-tight text-balance">
-              Trusted infrastructure for business messaging
-            </h2>
-          </div>
+    <section className="bg-[#0f1117] py-20 sm:py-28 overflow-hidden">
+      <div className="max-w-7xl mx-auto px-5 sm:px-8 grid lg:grid-cols-2 gap-12 items-center">
+        <Reveal direction="right">
+          <ShieldIllustration />
         </Reveal>
-
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {ITEMS.map((item, i) => (
-            <Reveal key={item.title} delay={i * 0.06}>
-              <div className="neu-card hover-lift h-full p-6">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center mb-4">
-                  <item.icon className="w-5 h-5 text-primary" />
-                </div>
-                <h4 className="font-semibold text-gray-900 mb-1.5">{item.title}</h4>
-                <p className="text-sm text-gray-500 leading-relaxed">{item.desc}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
+        <Reveal direction="left">
+          <p className="text-sm font-semibold text-primary mb-3">Enterprise Security</p>
+          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight text-balance mb-5">
+            Trusted infrastructure for business messaging
+          </h2>
+          <ul className="space-y-3">
+            {POINTS.map((point) => (
+              <li key={point} className="flex items-start gap-3 text-sm text-white/60">
+                <CheckCircle2 className="w-4.5 h-4.5 text-primary flex-shrink-0 mt-0.5" />
+                {point}
+              </li>
+            ))}
+          </ul>
+        </Reveal>
       </div>
     </section>
   );
