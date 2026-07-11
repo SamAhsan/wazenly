@@ -27,6 +27,7 @@ import { notificationsRouter } from "./routes/notifications";
 import { adminRouter } from "./routes/admin";
 import { apiV1Router } from "./routes/api-v1";
 import { docsRouter } from "./routes/docs";
+import { contactRouter } from "./routes/contact";
 
 import { errorHandler } from "./middleware/error-handler";
 import { setupSocketHandlers } from "./socket/handlers";
@@ -94,6 +95,7 @@ app.use("/api/notifications", notificationsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/v1", apiV1Router);
 app.use("/api/docs", docsRouter);
+app.use("/api/contact", contactRouter);
 
 app.get("/api/health", (_, res) => res.json({ status: "ok", version: "1.0.0" }));
 

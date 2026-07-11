@@ -3,7 +3,8 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { MessageCircle, AlertCircle } from "lucide-react";
+import Image from "next/image";
+import { AlertCircle } from "lucide-react";
 
 const ERROR_MESSAGES: Record<string, string> = {
   Configuration: "There is a problem with the server configuration.",
@@ -45,9 +46,7 @@ export default function AuthErrorPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <MessageCircle className="w-6 h-6 text-white" />
-            </div>
+            <Image src="/logo-mark.png" alt="Wazenly" width={40} height={40} />
             <span className="text-2xl font-bold text-white tracking-tight">WAZENLY</span>
           </div>
         </div>

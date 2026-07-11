@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { MessageCircle } from "lucide-react";
+import Image from "next/image";
 import api from "@/lib/api";
 
 function VerifyEmailContent() {
@@ -32,9 +32,7 @@ function VerifyEmailContent() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <MessageCircle className="w-6 h-6 text-white" />
-            </div>
+            <Image src="/logo-mark.png" alt="Wazenly" width={40} height={40} />
             <span className="text-2xl font-bold text-white tracking-tight">WAZENLY</span>
           </div>
         </div>

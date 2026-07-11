@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   LayoutDashboard, MessageSquare, Megaphone, Users, FileText,
-  Workflow, Phone, BarChart3, Settings, MessageCircle, ChevronRight, X, Activity,
+  Workflow, Phone, BarChart3, Settings, ChevronRight, X, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hasMinRole, type Role } from "@/lib/permissions";
@@ -38,9 +39,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-5 border-b border-sidebar-border flex-shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-            <MessageCircle className="w-5 h-5 text-white" />
-          </div>
+          <Image src="/logo-mark.png" alt="Wazenly" width={28} height={28} className="flex-shrink-0" />
           <span className="text-white font-bold text-lg tracking-tight">WAZENLY</span>
         </div>
         {/* Close button — mobile only */}

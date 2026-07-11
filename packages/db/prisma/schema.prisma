@@ -812,3 +812,21 @@ model DailyAnalytics {
   @@unique([workspaceId, numberId, date])
   @@index([workspaceId, date])
 }
+
+// ─────────────────────────────────────────────────────────
+// PUBLIC MARKETING SITE
+// ─────────────────────────────────────────────────────────
+
+model ContactSubmission {
+  id        String   @id @default(cuid())
+  name      String
+  company   String?
+  email     String
+  phone     String?
+  subject   String
+  message   String
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
