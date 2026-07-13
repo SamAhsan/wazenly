@@ -125,8 +125,13 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
       // Process incoming messages
       if (value.messages) {
         for (const msg of value.messages) {
+          // A crash processing one message must not prevent other messages/status
+          // updates in the same batched webhook call from being processed -- Meta
+          // already got its 200 OK before this job runs, so it won't retry, and
+          // anything skipped here is gone for good.
+          try {
           const contactProfile = value.contacts?.find((c) => c.wa_id === msg.from);
-          const contactName = contactProfile?.profile.name;
+          const contactName = contactProfile?.profile?.name;
 
           // Upsert contact
           let contact = await prisma.contact.findFirst({
@@ -247,12 +252,16 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
           } catch (err) {
             console.error(`[WebhookWorker] Notification error for contact ${contact.id}:`, (err as Error).message);
           }
+          } catch (err) {
+            console.error(`[WebhookWorker] Failed processing inbound message ${msg.id} from ${msg.from}:`, (err as Error).message);
+          }
         }
       }
 
       // Process status updates
       if (value.statuses) {
         for (const status of value.statuses) {
+          try {
           const metaStatus = status.status;
           const updateData: Record<string, unknown> = {};
 
@@ -342,6 +351,9 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
             status: metaStatus,
             phone: status.recipient_id,
           });
+          } catch (err) {
+            console.error(`[WebhookWorker] Failed processing status update for message ${status.id}:`, (err as Error).message);
+          }
         }
       }
     }
