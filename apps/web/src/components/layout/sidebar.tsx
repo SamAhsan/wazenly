@@ -39,7 +39,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-5 border-b border-sidebar-border flex-shrink-0">
         <div className="flex items-center gap-2.5">
-          <Image src="/logo-mark.png" alt="Wazenly" width={28} height={28} className="flex-shrink-0" />
+          <Image src="/logo-mark.png" alt="Wazenly" width={38} height={38} className="flex-shrink-0" />
           <span className="text-white font-bold text-lg tracking-tight">WAZENLY</span>
         </div>
         {/* Close button — mobile only */}

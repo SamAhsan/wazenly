@@ -69,7 +69,7 @@ function LoginFormInner() {
         <div className="relative max-w-md">
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <Link href="/" className="flex items-center gap-2.5 mb-10">
-              <Image src="/logo-mark.png" alt="Wazenly" width={32} height={32} />
+              <Image src="/logo-mark.png" alt="Wazenly" width={40} height={40} />
               <span className="text-xl font-bold text-white tracking-tight">WAZENLY</span>
             </Link>
             <h2 className="text-3xl font-bold text-white tracking-tight leading-tight text-balance">

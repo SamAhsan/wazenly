@@ -8,7 +8,7 @@ export function Footer() {
       <div className="max-w-7xl mx-auto px-5 sm:px-8 py-14 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
         <div className="lg:col-span-2">
           <Link href="/" className="flex items-center gap-2.5 mb-4">
-            <Image src="/logo-mark.png" alt="Wazenly" width={28} height={28} />
+            <Image src="/logo-mark.png" alt="Wazenly" width={38} height={38} />
             <span className="text-lg font-bold text-white tracking-tight">WAZENLY</span>
           </Link>
           <p className="text-sm leading-relaxed max-w-sm">

@@ -18,7 +18,7 @@ export function ProductVideo({
         <Reveal direction="fade">
           <div className="rounded-2xl border-4 border-primary overflow-hidden shadow-xl shadow-primary/15">
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video controls preload="metadata" className="w-full aspect-video bg-black" poster="/logo-mark.png">
+            <video autoPlay muted loop playsInline controls className="w-full aspect-video bg-black">
               <source src="/wazenly-product-demo.mp4" type="video/mp4" />
             </video>
           </div>

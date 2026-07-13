@@ -37,7 +37,7 @@ export function Nav() {
     >
       <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <Image src="/logo-mark.png" alt="Wazenly" width={30} height={30} className="transition-transform group-hover:scale-105" priority />
+          <Image src="/logo-mark.png" alt="Wazenly" width={42} height={42} className="transition-transform group-hover:scale-105" priority />
           <span className="text-lg font-bold text-white tracking-tight">WAZENLY</span>
         </Link>
 
