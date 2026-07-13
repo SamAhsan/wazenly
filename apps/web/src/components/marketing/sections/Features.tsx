@@ -1,48 +1,10 @@
-import { Megaphone, Workflow, BarChart3, Lock, Webhook, CheckCircle2 } from "lucide-react";
+import Image from "next/image";
+import { Workflow, BarChart3, Lock, Webhook, CheckCircle2 } from "lucide-react";
 import { Reveal } from "../Reveal";
 
 const MORE_ITEMS = [
   "Contact Management", "Message Templates", "Role-Based Permissions", "Multi-Company Support", "Broadcast Scheduling",
 ];
-
-function BurstIllustration() {
-  return (
-    <div className="relative w-full h-28 flex items-center justify-center">
-      <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center z-10">
-        <Megaphone className="w-4 h-4 text-primary" />
-      </div>
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="absolute rounded-full border border-primary/30"
-          style={{ width: 56 + i * 30, height: 56 + i * 30, opacity: 0.5 - i * 0.15 }}
-        />
-      ))}
-      {[
-        { top: "10%", left: "20%" }, { top: "15%", right: "15%" }, { bottom: "12%", left: "25%" }, { bottom: "18%", right: "20%" },
-      ].map((pos, i) => (
-        <div key={i} className="absolute w-2.5 h-2.5 rounded-full bg-primary/60" style={pos} />
-      ))}
-    </div>
-  );
-}
-
-function InboxIllustration() {
-  return (
-    <div className="relative w-full h-28 flex items-center justify-center gap-[-8px]">
-      <div className="flex -space-x-3">
-        {["bg-primary", "bg-blue-400", "bg-purple-400"].map((c, i) => (
-          <div key={i} className={`w-10 h-10 rounded-full ${c} border-2 border-white flex items-center justify-center text-white text-xs font-bold`} style={{ zIndex: 3 - i }}>
-            {String.fromCharCode(65 + i)}
-          </div>
-        ))}
-      </div>
-      <div className="absolute -bottom-1 right-[30%] w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center">
-        <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
-      </div>
-    </div>
-  );
-}
 
 function FlowIllustration() {
   return (
@@ -85,21 +47,41 @@ export function Features() {
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-[minmax(0,1fr)]">
           <Reveal className="sm:col-span-2 lg:col-span-2 lg:row-span-2">
-            <div className="neu-card hover-lift h-full p-7 flex flex-col">
-              <BurstIllustration />
-              <h4 className="font-semibold text-gray-900 text-lg mt-2 mb-2">Campaigns &amp; Broadcast Messaging</h4>
-              <p className="text-sm text-gray-500 leading-relaxed">
-                Plan, schedule, and launch campaigns to segmented contact lists — reach thousands of customers in one send,
-                automatically paced within Meta's rate limits.
-              </p>
+            <div className="neu-card hover-lift h-full flex flex-col overflow-hidden">
+              <div className="relative w-full aspect-[4/3] bg-white">
+                <Image
+                  src="/campaigns-feature.png"
+                  alt="Wazenly WhatsApp campaigns and broadcast messaging interface"
+                  fill
+                  className="object-contain p-8"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                />
+              </div>
+              <div className="p-7 pt-2 flex flex-col flex-1">
+                <h4 className="font-semibold text-gray-900 text-lg mb-2">Campaigns &amp; Broadcast Messaging</h4>
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  Plan, schedule, and launch campaigns to segmented contact lists — reach thousands of customers in one send,
+                  automatically paced within Meta's rate limits.
+                </p>
+              </div>
             </div>
           </Reveal>
 
           <Reveal delay={0.05} className="lg:col-span-2">
-            <div className="neu-card hover-lift h-full p-6 flex flex-col">
-              <InboxIllustration />
-              <h4 className="font-semibold text-gray-900 mt-3 mb-1.5">Shared Team Inbox</h4>
-              <p className="text-sm text-gray-500 leading-relaxed">One inbox for the whole team — assign, resolve, and never double-reply.</p>
+            <div className="neu-card hover-lift h-full flex flex-col overflow-hidden">
+              <div className="relative w-full aspect-video bg-gray-900">
+                <Image
+                  src="/inbox-feature.jpg"
+                  alt="Wazenly shared team inbox for WhatsApp conversations"
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                />
+              </div>
+              <div className="p-6 pt-4 flex flex-col flex-1">
+                <h4 className="font-semibold text-gray-900 mb-1.5">Shared Team Inbox</h4>
+                <p className="text-sm text-gray-500 leading-relaxed">One inbox for the whole team — assign, resolve, and never double-reply.</p>
+              </div>
             </div>
           </Reveal>
 

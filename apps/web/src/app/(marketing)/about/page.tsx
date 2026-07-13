@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { Target, Eye, ShieldCheck, Users, Rocket, Layers, Lock, Map } from "lucide-react";
+import { Target, Eye, ShieldCheck, Users, Rocket, Layers, Lock, Map, Building2 } from "lucide-react";
 import { Reveal } from "@/components/marketing/Reveal";
+import { ProductVideo } from "@/components/marketing/ProductVideo";
+import { PageHero } from "@/components/marketing/PageHero";
 
 const TITLE = "About Wazenly — Official WhatsApp Business API Platform";
 const DESCRIPTION =
@@ -36,20 +38,12 @@ export default function AboutPage() {
       {/* eslint-disable-next-line react/no-danger */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
-      <section className="bg-[#0f1117] pt-20 pb-24 sm:pt-28 sm:pb-32">
-        <div className="max-w-4xl mx-auto px-5 sm:px-8 text-center">
-          <Reveal>
-            <p className="text-sm font-semibold text-primary mb-3">About Wazenly</p>
-            <h1 className="text-4xl sm:text-5xl font-bold text-white tracking-tight text-balance">
-              Business messaging, built to be trusted
-            </h1>
-            <p className="mt-5 text-lg text-white/60 leading-relaxed text-balance max-w-2xl mx-auto">
-              Wazenly exists because WhatsApp became the primary channel businesses use to talk to customers —
-              but most teams were still managing it like a personal chat app.
-            </p>
-          </Reveal>
-        </div>
-      </section>
+      <PageHero
+        eyebrow="About Wazenly"
+        title="Business messaging, built to be trusted"
+        description="Wazenly exists because WhatsApp became the primary channel businesses use to talk to customers — but most teams were still managing it like a personal chat app."
+        icon={<Building2 className="w-6 h-6 text-primary" />}
+      />
 
       <section className="bg-white py-20 sm:py-28">
         <div className="max-w-3xl mx-auto px-5 sm:px-8 space-y-16">
@@ -139,6 +133,11 @@ export default function AboutPage() {
           </Reveal>
         </div>
       </section>
+
+      <ProductVideo
+        title="Why businesses choose Wazenly for WhatsApp marketing"
+        description="A short walkthrough of the platform — how campaigns, the shared inbox, and automation come together on the official Meta WhatsApp Business API."
+      />
     </>
   );
 }

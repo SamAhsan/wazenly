@@ -3,6 +3,7 @@ import { Hero } from "@/components/marketing/sections/Hero";
 import { TrustBar } from "@/components/marketing/sections/TrustBar";
 import { Features } from "@/components/marketing/sections/Features";
 import { Showcase } from "@/components/marketing/sections/Showcase";
+import { ProductVideo } from "@/components/marketing/ProductVideo";
 import { HowItWorks } from "@/components/marketing/sections/HowItWorks";
 import { Security } from "@/components/marketing/sections/Security";
 import { Faq, FAQ_ITEMS } from "@/components/marketing/sections/Faq";
@@ -64,6 +65,7 @@ export default function HomePage() {
       <TrustBar />
       <Features />
       <Showcase />
+      <ProductVideo />
       <HowItWorks />
       <Security />
       <Faq />

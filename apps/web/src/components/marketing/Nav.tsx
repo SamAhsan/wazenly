@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { Menu, X, FileText } from "lucide-react";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -49,7 +49,16 @@ export function Nav() {
           ))}
         </div>
 
-        <div className="hidden md:block">
+        <div className="hidden md:flex items-center gap-3">
+          <a
+            href="/wazenly-deck.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 border border-white/15 hover:border-white/30 hover:bg-white/5 text-white/80 hover:text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            WhatsApp Marketing Solutions
+          </a>
           <Link
             href="/auth/login"
             className="inline-flex items-center bg-primary hover:bg-primary-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors"
@@ -70,6 +79,15 @@ export function Nav() {
               {l.label}
             </Link>
           ))}
+          <a
+            href="/wazenly-deck.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 border border-white/15 text-white/80 text-sm font-medium px-5 py-2.5 rounded-lg mt-2"
+          >
+            <FileText className="w-4 h-4" />
+            WhatsApp Marketing Solutions
+          </a>
           <Link
             href="/auth/login"
             className="block text-center bg-primary hover:bg-primary-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg mt-2"

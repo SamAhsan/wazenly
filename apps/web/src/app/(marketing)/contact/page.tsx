@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { Mail, Phone } from "lucide-react";
+import { Mail, Phone, MessageCircle } from "lucide-react";
 import { Reveal } from "@/components/marketing/Reveal";
 import { ContactForm } from "@/components/marketing/ContactForm";
+import { PageHero } from "@/components/marketing/PageHero";
 
 const TITLE = "Contact Wazenly — Talk to Our Team";
 const DESCRIPTION =
@@ -30,17 +31,12 @@ export default function ContactPage() {
       {/* eslint-disable-next-line react/no-danger */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
-      <section className="bg-[#0f1117] pt-20 pb-16 sm:pt-28 sm:pb-20">
-        <div className="max-w-4xl mx-auto px-5 sm:px-8 text-center">
-          <Reveal>
-            <p className="text-sm font-semibold text-primary mb-3">Contact</p>
-            <h1 className="text-4xl sm:text-5xl font-bold text-white tracking-tight text-balance">Let's talk</h1>
-            <p className="mt-5 text-lg text-white/60 leading-relaxed max-w-xl mx-auto text-balance">
-              Have a question, or ready to set up your workspace? Reach out and we'll respond as soon as we can.
-            </p>
-          </Reveal>
-        </div>
-      </section>
+      <PageHero
+        eyebrow="Contact"
+        title="Let's talk"
+        description="Have a question, or ready to set up your workspace? Reach out and we'll respond as soon as we can."
+        icon={<MessageCircle className="w-6 h-6 text-primary" />}
+      />
 
       <section className="bg-[#f6f8fa] py-16 sm:py-24">
         <div className="max-w-5xl mx-auto px-5 sm:px-8 grid lg:grid-cols-5 gap-8">
