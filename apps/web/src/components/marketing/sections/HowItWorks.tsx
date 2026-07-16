@@ -26,14 +26,19 @@ export function HowItWorks() {
               </div>
             </Reveal>
 
-            <div className="relative grid sm:grid-cols-2 lg:grid-cols-5 gap-y-10 gap-x-4">
-              <div
-                className="hidden lg:block absolute top-7 left-[10%] right-[10%] h-px"
-                style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,0.25) 0 8px, transparent 8px 16px)" }}
-              />
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-y-10 gap-x-4">
               {STEPS.map((step, i) => (
                 <Reveal key={step.title} delay={i * 0.08}>
                   <div className="relative flex flex-col items-center text-center lg:items-start lg:text-left">
+                    {i < STEPS.length - 1 && (
+                      <div
+                        className="hidden lg:block absolute top-7 left-7 h-px"
+                        style={{
+                          width: "calc(100% + 1rem)",
+                          backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,0.25) 0 8px, transparent 8px 16px)",
+                        }}
+                      />
+                    )}
                     <div className="relative z-10 w-14 h-14 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center mb-4">
                       <step.icon className="w-6 h-6 text-primary" />
                     </div>

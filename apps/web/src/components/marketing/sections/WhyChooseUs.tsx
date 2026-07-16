@@ -1,26 +1,26 @@
-import { ImageIcon } from "lucide-react";
+import Image from "next/image";
 import { Reveal } from "../Reveal";
 
 const ITEMS = [
   {
     title: "Engage Customers Better",
     description: "Reach customers on the app they already use every day, with 98% open rates and real conversations instead of ignored emails.",
-    placeholder: "Photo: customer support agent messaging on WhatsApp",
+    image: "/Engage customer better.png",
   },
   {
     title: "Empower Your Team",
     description: "A shared inbox with assignment and internal notes means your team works together instead of stepping on each other.",
-    placeholder: "Photo: team collaborating in an office",
+    image: "/empower your team.png",
   },
   {
     title: "Track What Matters",
     description: "Delivery, read, and reply rates update in real time so you always know what's working.",
-    placeholder: "Photo: analytics dashboard on a laptop screen",
+    image: "/track what matters.png",
   },
   {
     title: "Scale Without Limits",
     description: "From a single number to multiple companies and workspaces, Wazenly grows with your business.",
-    placeholder: "Photo: growing business / warehouse or storefront",
+    image: "/Scale without limit.png",
   },
 ];
 
@@ -41,9 +41,14 @@ export function WhyChooseUs() {
           {ITEMS.map((item, i) => (
             <Reveal key={item.title} delay={i * 0.08}>
               <div className="flat-card hover-lift h-full flex flex-col overflow-hidden">
-                <div className="relative w-full aspect-[4/3] bg-gray-50 border-b border-gray-100 flex flex-col items-center justify-center gap-2 px-4 text-center">
-                  <ImageIcon className="w-6 h-6 text-gray-300" />
-                  <p className="text-[11px] text-gray-400 leading-snug">{item.placeholder}</p>
+                <div className="relative w-full aspect-[3/2] bg-gray-50 border-b border-gray-100">
+                  <Image
+                    src={item.image}
+                    alt={item.title}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                  />
                 </div>
                 <div className="p-5 flex flex-col flex-1">
                   <h4 className="font-semibold text-gray-900 mb-1.5">{item.title}</h4>

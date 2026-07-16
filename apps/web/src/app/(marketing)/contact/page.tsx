@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { Mail, Phone, MessageCircle } from "lucide-react";
 import { Reveal } from "@/components/marketing/Reveal";
 import { ContactForm } from "@/components/marketing/ContactForm";
@@ -73,6 +74,17 @@ export default function ContactPage() {
                   <p className="text-sm font-semibold text-gray-900">+90 552 873 8477</p>
                 </div>
               </a>
+            </Reveal>
+            <Reveal direction="right" delay={0.3}>
+              <div className="flat-card relative w-full aspect-square overflow-hidden">
+                <Image
+                  src="/campaigns-feature.png"
+                  alt="Wazenly WhatsApp campaigns and broadcast messaging"
+                  fill
+                  className="object-contain p-8"
+                  sizes="(max-width: 1024px) 100vw, 40vw"
+                />
+              </div>
             </Reveal>
           </div>
 

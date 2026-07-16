@@ -14,6 +14,7 @@ export function Footer() {
           <p className="text-sm leading-relaxed max-w-sm">
             The official Meta WhatsApp Business Platform for teams — campaigns, a shared inbox, automation, and analytics in one enterprise-grade workspace.
           </p>
+          <Image src="/Meta logo.png" alt="Meta Business Partner" width={140} height={80} className="mt-6 rounded-lg" />
         </div>
 
         <div>

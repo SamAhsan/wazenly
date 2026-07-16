@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ArrowRight, ImageIcon } from "lucide-react";
+import Image from "next/image";
+import { ArrowRight } from "lucide-react";
 import { Reveal } from "../Reveal";
 
 export function FinalCta() {
@@ -33,9 +34,14 @@ export function FinalCta() {
             </Reveal>
 
             <Reveal direction="fade">
-              <div className="hidden lg:flex rounded-2xl bg-white/60 border border-primary/10 aspect-[4/3] flex-col items-center justify-center gap-2 text-center px-6">
-                <ImageIcon className="w-6 h-6 text-primary/40" />
-                <p className="text-xs text-gray-400">Photo: team using Wazenly / customer support</p>
+              <div className="hidden lg:flex relative rounded-2xl bg-white/60 border border-primary/10 aspect-[4/3] items-center justify-center p-6">
+                <Image
+                  src="/Ready to run WhatsApp like an enterprise.png"
+                  alt="Wazenly WhatsApp marketing in action"
+                  fill
+                  className="object-contain p-6"
+                  sizes="(max-width: 1024px) 0px, 50vw"
+                />
               </div>
             </Reveal>
           </div>
