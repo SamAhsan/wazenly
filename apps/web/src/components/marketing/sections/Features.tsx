@@ -69,10 +69,10 @@ export function Features() {
         </div>
 
         <Reveal delay={0.3}>
-          <div className="mt-6 flat-card px-6 py-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+          <div className="mt-6 rounded-2xl bg-primary px-6 py-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
             {MORE_ITEMS.map((item) => (
-              <span key={item} className="flex items-center gap-2 text-sm text-gray-600">
-                <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+              <span key={item} className="flex items-center gap-2 text-sm text-white">
+                <CheckCircle2 className="w-4 h-4 text-white flex-shrink-0" />
                 {item}
               </span>
             ))}

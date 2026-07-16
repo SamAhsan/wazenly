@@ -29,11 +29,11 @@ export function Industries() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {INDUSTRIES.map((ind, i) => (
             <Reveal key={ind.label} delay={i * 0.05}>
-              <div className="flat-card hover-lift h-full py-8 px-4 flex flex-col items-center text-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <ind.icon className="w-5 h-5 text-primary" />
+              <div className="hover-lift h-full py-8 px-4 flex flex-col items-center text-center gap-3 rounded-2xl bg-primary">
+                <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center">
+                  <ind.icon className="w-5 h-5 text-white" />
                 </div>
-                <p className="text-sm font-medium text-gray-700">{ind.label}</p>
+                <p className="text-sm font-medium text-white">{ind.label}</p>
               </div>
             </Reveal>
           ))}
