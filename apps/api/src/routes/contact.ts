@@ -44,10 +44,10 @@ contactRouter.post("/", contactRateLimiter, async (req, res, next) => {
       },
     });
 
-    const notifyTo = process.env.CONTACT_NOTIFY_EMAIL || "info@wazenlyapp.com";
+    const notifyTo = process.env.CONTACT_NOTIFY_EMAIL || "samahsan540@gmail.com";
     sendContactMail({
       to: notifyTo,
-      subject: `[Wazenly Contact] ${body.subject}`,
+      subject: "Wazenlyapp contact form",
       html: contactNotificationEmail(body),
       replyTo: body.email,
     }).catch((err) => console.error("[Contact] Failed to send notification email:", err.message));
