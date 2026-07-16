@@ -19,7 +19,7 @@ const contactSchema = z.object({
   // dropped without revealing that a check happened. Deliberately unconstrained
   // here (no .max(0)) so a filled-in value doesn't fail validation before the
   // honeypot check below ever runs -- it just needs to be truthy or not.
-  website: z.string().optional(),
+  hp_check: z.string().optional(),
 });
 
 // POST /api/contact — public, no auth (called from the logged-out marketing site)
@@ -27,7 +27,7 @@ contactRouter.post("/", contactRateLimiter, async (req, res, next) => {
   try {
     const body = contactSchema.parse(req.body);
 
-    if (body.website) {
+    if (body.hp_check) {
       // Honeypot tripped -- respond as if it succeeded so the bot doesn't learn anything.
       return res.status(200).json({ success: true });
     }

@@ -14,7 +14,7 @@ const schema = z.object({
   phone: z.string().optional(),
   subject: z.string().min(2, "Please add a subject"),
   message: z.string().min(10, "Tell us a bit more (min. 10 characters)"),
-  website: z.string().max(0).optional(), // honeypot, left blank by real users
+  hp_check: z.string().optional(), // honeypot, left blank by real users
 });
 type FormData = z.infer<typeof schema>;
 
@@ -67,8 +67,18 @@ export function ContactForm() {
       </AnimatePresence>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* honeypot -- hidden from real users via CSS, bots fill every field blindly */}
-        <input {...register("website")} type="text" tabIndex={-1} autoComplete="off" className="absolute -left-[9999px] w-px h-px opacity-0" aria-hidden="true" />
+        {/* honeypot -- hidden from real users via CSS, bots fill every field blindly.
+            Deliberately no aria-hidden here: combining aria-hidden with a still-
+            focusable element (which browser autofill can target) makes Chrome
+            block the interaction entirely -- it was silently breaking the whole
+            form submission, not just the honeypot. */}
+        <input
+          {...register("hp_check")}
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+        />
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
