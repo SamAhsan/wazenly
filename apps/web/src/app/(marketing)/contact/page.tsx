@@ -38,11 +38,11 @@ export default function ContactPage() {
         icon={<MessageCircle className="w-6 h-6 text-primary" />}
       />
 
-      <section className="bg-[#f6f8fa] py-16 sm:py-24">
+      <section className="bg-[#F7FAF8] py-16 sm:py-24">
         <div className="max-w-5xl mx-auto px-5 sm:px-8 grid lg:grid-cols-5 gap-8">
           <div className="lg:col-span-2 space-y-4">
             <Reveal direction="right">
-              <a href="mailto:info@wazenlyapp.com" className="neu-card hover-lift flex items-center gap-4 p-5 block">
+              <a href="mailto:info@wazenlyapp.com" className="flat-card hover-lift flex items-center gap-4 p-5 block">
                 <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Mail className="w-5 h-5 text-primary" />
                 </div>
@@ -53,7 +53,7 @@ export default function ContactPage() {
               </a>
             </Reveal>
             <Reveal direction="right" delay={0.1}>
-              <a href="https://wa.me/923004347067" target="_blank" rel="noopener noreferrer" className="neu-card hover-lift flex items-center gap-4 p-5 block">
+              <a href="https://wa.me/923004347067" target="_blank" rel="noopener noreferrer" className="flat-card hover-lift flex items-center gap-4 p-5 block">
                 <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Phone className="w-5 h-5 text-primary" />
                 </div>
@@ -64,7 +64,7 @@ export default function ContactPage() {
               </a>
             </Reveal>
             <Reveal direction="right" delay={0.2}>
-              <a href="https://wa.me/905528738477" target="_blank" rel="noopener noreferrer" className="neu-card hover-lift flex items-center gap-4 p-5 block">
+              <a href="https://wa.me/905528738477" target="_blank" rel="noopener noreferrer" className="flat-card hover-lift flex items-center gap-4 p-5 block">
                 <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Phone className="w-5 h-5 text-primary" />
                 </div>
@@ -78,7 +78,7 @@ export default function ContactPage() {
 
           <div className="lg:col-span-3">
             <Reveal direction="left">
-              <div className="neu-card p-6 sm:p-8">
+              <div className="flat-card p-6 sm:p-8">
                 <ContactForm />
               </div>
             </Reveal>

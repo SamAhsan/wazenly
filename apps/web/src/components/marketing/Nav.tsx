@@ -31,19 +31,25 @@ export function Nav() {
 
   return (
     <header
-      className={`sticky top-0 z-50 bg-[#0f1117] border-b transition-shadow duration-300 ${
-        scrolled ? "border-white/10 shadow-lg shadow-black/20" : "border-white/5"
+      className={`sticky top-0 z-50 bg-white border-b transition-shadow duration-300 ${
+        scrolled ? "border-gray-200 shadow-sm" : "border-gray-100"
       }`}
     >
       <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <Image src="/logo-mark.png" alt="Wazenly" width={42} height={42} className="transition-transform group-hover:scale-105" priority />
-          <span className="text-lg font-bold text-white tracking-tight">WAZENLY</span>
+          <Image src="/logo-mark.png" alt="Wazenly" width={38} height={38} className="transition-transform group-hover:scale-105" priority />
+          <span className="text-lg font-bold text-gray-900 tracking-tight">Wazenlyapp</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
           {LINKS.map((l) => (
-            <Link key={l.href} href={l.href} className="text-sm font-medium text-white/70 hover:text-white transition-colors">
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`text-sm font-medium transition-colors ${
+                pathname === l.href ? "text-primary" : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
               {l.label}
             </Link>
           ))}
@@ -54,7 +60,7 @@ export function Nav() {
             href="/wazenly-deck.pdf"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 border border-white/15 hover:border-white/30 hover:bg-white/5 text-white/80 hover:text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-600 hover:text-gray-900 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
           >
             <FileText className="w-4 h-4" />
             WhatsApp Marketing Solutions
@@ -67,15 +73,19 @@ export function Nav() {
           </Link>
         </div>
 
-        <button onClick={() => setMobileOpen((v) => !v)} className="md:hidden text-white p-2" aria-label="Toggle menu">
+        <button onClick={() => setMobileOpen((v) => !v)} className="md:hidden text-gray-700 p-2" aria-label="Toggle menu">
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
       </nav>
 
       {mobileOpen && (
-        <div className="md:hidden bg-[#0f1117] border-t border-white/5 px-5 py-4 space-y-1">
+        <div className="md:hidden bg-white border-t border-gray-100 px-5 py-4 space-y-1">
           {LINKS.map((l) => (
-            <Link key={l.href} href={l.href} className="block px-2 py-2.5 text-sm font-medium text-white/70 hover:text-white">
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`block px-2 py-2.5 text-sm font-medium ${pathname === l.href ? "text-primary" : "text-gray-600 hover:text-gray-900"}`}
+            >
               {l.label}
             </Link>
           ))}
@@ -83,7 +93,7 @@ export function Nav() {
             href="/wazenly-deck.pdf"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 border border-white/15 text-white/80 text-sm font-medium px-5 py-2.5 rounded-lg mt-2"
+            className="flex items-center justify-center gap-2 border border-gray-200 text-gray-600 text-sm font-medium px-5 py-2.5 rounded-lg mt-2"
           >
             <FileText className="w-4 h-4" />
             WhatsApp Marketing Solutions

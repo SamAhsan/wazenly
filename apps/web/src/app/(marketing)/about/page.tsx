@@ -62,7 +62,7 @@ export default function AboutPage() {
 
           <div className="grid sm:grid-cols-2 gap-8">
             <Reveal>
-              <div className="neu-card p-7 h-full">
+              <div className="flat-card p-7 h-full">
                 <Target className="w-6 h-6 text-primary mb-3" />
                 <h3 className="font-semibold text-gray-900 mb-2">Mission</h3>
                 <p className="text-sm text-gray-500 leading-relaxed">
@@ -72,7 +72,7 @@ export default function AboutPage() {
               </div>
             </Reveal>
             <Reveal delay={0.1}>
-              <div className="neu-card p-7 h-full">
+              <div className="flat-card p-7 h-full">
                 <Eye className="w-6 h-6 text-primary mb-3" />
                 <h3 className="font-semibold text-gray-900 mb-2">Vision</h3>
                 <p className="text-sm text-gray-500 leading-relaxed">

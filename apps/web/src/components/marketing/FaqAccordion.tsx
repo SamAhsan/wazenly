@@ -16,7 +16,7 @@ export function FaqAccordion({ items }: { items: { question: string; answer: str
             key={item.question}
             open={isOpen}
             onOpenChange={(open) => setOpenIndex(open ? i : null)}
-            className="neu-card overflow-hidden"
+            className="flat-card overflow-hidden"
           >
             <Collapsible.Trigger asChild>
               <button className="w-full flex items-center justify-between gap-4 px-5 sm:px-6 py-4 sm:py-5 text-left">

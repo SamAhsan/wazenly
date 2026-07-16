@@ -123,6 +123,31 @@
   .hover-lift:hover {
     transform: translateY(-4px);
   }
+
+  /* ── Flat cards (Home page redesign) ────────────────────────────────
+     Simpler than .neu-card: white surface, subtle border, soft single
+     shadow. Used for the reference-driven light SaaS look on the Home
+     page; .neu-card stays untouched for pages not yet redesigned. */
+  .flat-card {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    border-radius: 1.25rem;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .flat-card:hover {
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+  }
+  .flat-input {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 0.75rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .flat-input:focus {
+    outline: none;
+    border-color: rgba(37, 211, 102, 0.5);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

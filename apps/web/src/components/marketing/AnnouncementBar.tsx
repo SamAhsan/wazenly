@@ -8,7 +8,7 @@ export function AnnouncementBar() {
   if (dismissed) return null;
 
   return (
-    <div className="bg-primary text-white">
+    <div className="bg-primary/10 text-primary-700 border-b border-primary/10">
       <div className="max-w-7xl mx-auto px-5 sm:px-8 h-9 flex items-center justify-center gap-2 relative text-xs sm:text-sm font-medium">
         <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" />
         <span className="text-center">
@@ -16,7 +16,7 @@ export function AnnouncementBar() {
         </span>
         <button
           onClick={() => setDismissed(true)}
-          className="absolute right-4 sm:right-8 p-0.5 hover:bg-white/20 rounded-full transition-colors"
+          className="absolute right-4 sm:right-8 p-0.5 hover:bg-primary/15 rounded-full transition-colors"
           aria-label="Dismiss"
         >
           <X className="w-3.5 h-3.5" />

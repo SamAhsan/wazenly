@@ -47,7 +47,7 @@ export function ContactForm() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="glass mb-5 flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
+            className="bg-primary/10 border border-primary/20 mb-5 flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
           >
             <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0" />
             <span className="text-gray-800">Thanks — your message has been sent. We'll get back to you shortly.</span>
@@ -58,7 +58,7 @@ export function ContactForm() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="glass mb-5 flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
+            className="bg-red-50 border border-red-200 mb-5 flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
           >
             <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <span className="text-gray-800">Something went wrong sending your message. Please try again in a moment.</span>
@@ -83,36 +83,36 @@ export function ContactForm() {
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Name *</label>
-            <input {...register("name")} className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="Your name" />
+            <input {...register("name")} className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20" placeholder="Your name" />
             {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Company</label>
-            <input {...register("company")} className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="Company name" />
+            <input {...register("company")} className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20" placeholder="Company name" />
           </div>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label>
-            <input {...register("email")} type="email" className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="you@company.com" />
+            <input {...register("email")} type="email" className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20" placeholder="you@company.com" />
             {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone</label>
-            <input {...register("phone")} className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="+1 234 567 8900" />
+            <input {...register("phone")} className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20" placeholder="+1 234 567 8900" />
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Subject *</label>
-          <input {...register("subject")} className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="How can we help?" />
+          <input {...register("subject")} className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20" placeholder="How can we help?" />
           {errors.subject && <p className="text-red-500 text-xs mt-1">{errors.subject.message}</p>}
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Message *</label>
-          <textarea {...register("message")} rows={5} className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" placeholder="Tell us about your business and what you're looking for..." />
+          <textarea {...register("message")} rows={5} className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20 resize-none" placeholder="Tell us about your business and what you're looking for..." />
           {errors.message && <p className="text-red-500 text-xs mt-1">{errors.message.message}</p>}
         </div>
 

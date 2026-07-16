@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { Hero } from "@/components/marketing/sections/Hero";
-import { TrustBar } from "@/components/marketing/sections/TrustBar";
 import { Features } from "@/components/marketing/sections/Features";
-import { Showcase } from "@/components/marketing/sections/Showcase";
+import { Plans } from "@/components/marketing/sections/Plans";
+import { WhyChooseUs } from "@/components/marketing/sections/WhyChooseUs";
 import { ProductVideo } from "@/components/marketing/ProductVideo";
 import { HowItWorks } from "@/components/marketing/sections/HowItWorks";
 import { Security } from "@/components/marketing/sections/Security";
+import { Industries } from "@/components/marketing/sections/Industries";
 import { Faq, FAQ_ITEMS } from "@/components/marketing/sections/Faq";
 import { FinalCta } from "@/components/marketing/sections/FinalCta";
 
@@ -62,12 +63,13 @@ export default function HomePage() {
       {/* eslint-disable-next-line react/no-danger */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Hero />
-      <TrustBar />
       <Features />
-      <Showcase />
+      <Plans />
+      <WhyChooseUs />
       <ProductVideo />
       <HowItWorks />
       <Security />
+      <Industries />
       <Faq />
       <FinalCta />
     </>

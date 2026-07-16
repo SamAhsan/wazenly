@@ -5,9 +5,9 @@ import { Mail, Phone } from "lucide-react";
 export function Footer() {
   return (
     <footer className="bg-[#0f1117] border-t border-white/5 text-white/60">
-      <div className="max-w-7xl mx-auto px-5 sm:px-8 py-14 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
+      <div className="max-w-7xl mx-auto px-5 sm:px-8 py-16 sm:py-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-12">
         <div className="lg:col-span-2">
-          <Link href="/" className="flex items-center gap-2.5 mb-4">
+          <Link href="/" className="flex items-center gap-2.5 mb-5">
             <Image src="/logo-mark.png" alt="Wazenly" width={38} height={38} />
             <span className="text-lg font-bold text-white tracking-tight">WAZENLY</span>
           </Link>

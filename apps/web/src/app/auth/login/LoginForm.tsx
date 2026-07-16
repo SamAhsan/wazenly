@@ -60,10 +60,10 @@ function LoginFormInner() {
   return (
     <div className="min-h-screen flex">
       {/* Left: brand panel (hidden on mobile) */}
-      <div className="hidden lg:flex lg:w-1/2 relative bg-[#0f1117] items-center justify-center p-12 overflow-hidden">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-32 -left-20 w-[30rem] h-[30rem] rounded-full bg-primary/10 blur-[120px]" />
-          <div className="absolute bottom-0 right-0 w-[24rem] h-[24rem] rounded-full bg-blue-500/5 blur-[120px]" />
+      <div className="hidden lg:flex lg:w-1/2 relative bg-[#0B3D2E] items-center justify-center p-12 overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 opacity-40">
+          <div className="absolute -top-32 -left-20 w-[30rem] h-[30rem] rounded-full bg-primary/20 blur-[120px]" />
+          <div className="absolute bottom-0 right-0 w-[24rem] h-[24rem] rounded-full bg-emerald-400/10 blur-[120px]" />
         </div>
 
         <div className="relative max-w-md">
@@ -96,7 +96,7 @@ function LoginFormInner() {
       </div>
 
       {/* Right: form panel */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 neu-surface">
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 bg-[#F7FAF8]">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="w-full max-w-sm">
           <div className="lg:hidden flex items-center justify-center gap-2.5 mb-8">
             <Image src="/logo-mark.png" alt="Wazenly" width={32} height={32} />
@@ -113,7 +113,7 @@ function LoginFormInner() {
                 {...register("email")}
                 type="email"
                 placeholder="you@company.com"
-                className="neu-input w-full px-4 py-3 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="flat-input w-full px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
               />
               {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
             </div>
@@ -128,7 +128,7 @@ function LoginFormInner() {
                   {...register("password")}
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
-                  className="neu-input w-full px-4 py-3 pr-10 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="flat-input w-full px-4 py-3 pr-10 text-sm focus:ring-2 focus:ring-primary/20"
                 />
                 <button
                   type="button"

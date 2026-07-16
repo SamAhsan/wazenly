@@ -15,7 +15,7 @@ function ShieldIllustration() {
       {[0, 1, 2].map((i) => (
         <div
           key={i}
-          className="absolute rounded-full border border-primary/20"
+          className="absolute rounded-full border border-primary/15"
           style={{ width: 140 + i * 60, height: 140 + i * 60 }}
         />
       ))}
@@ -28,19 +28,19 @@ function ShieldIllustration() {
 
 export function Security() {
   return (
-    <section className="bg-[#0f1117] py-20 sm:py-28 overflow-hidden">
+    <section className="bg-[#F7FAF8] py-20 sm:py-28 overflow-hidden">
       <div className="max-w-7xl mx-auto px-5 sm:px-8 grid lg:grid-cols-2 gap-12 items-center">
         <Reveal direction="right">
           <ShieldIllustration />
         </Reveal>
         <Reveal direction="left">
           <p className="text-sm font-semibold text-primary mb-3">Enterprise Security</p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight text-balance mb-5">
+          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 tracking-tight text-balance mb-5">
             Trusted infrastructure for business messaging
           </h2>
           <ul className="space-y-3">
             {POINTS.map((point) => (
-              <li key={point} className="flex items-start gap-3 text-sm text-white/60">
+              <li key={point} className="flex items-start gap-3 text-sm text-gray-600">
                 <CheckCircle2 className="w-4.5 h-4.5 text-primary flex-shrink-0 mt-0.5" />
                 {point}
               </li>
