@@ -120,6 +120,18 @@ export class MetaApiService {
     return { id: response.data.id };
   }
 
+  // Editing an existing template (by its Meta template id, not name) resubmits
+  // it for review -- Meta only accepts `category` and `components` here, the
+  // name/language/WABA can't be changed after creation.
+  async editTemplate(templateId: string, payload: { category: string; components: object[] }): Promise<{ success: boolean }> {
+    const response = await axios.post(
+      `${META_GRAPH_URL}/${templateId}`,
+      payload,
+      { headers: this.headers }
+    );
+    return { success: response.data?.success ?? true };
+  }
+
   // Resolves which Meta App issued this instance's access token, via self-inspection
   // (input_token used as its own access_token — the standard way to debug a token
   // when you don't hold that app's secret). Needed because different WhatsApp numbers

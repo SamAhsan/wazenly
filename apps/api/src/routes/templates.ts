@@ -46,6 +46,11 @@ const templateSchema = z.object({
   bodyExamples: z.record(z.string()).optional(),
 });
 
+// Editing only touches content (category + components) -- Meta doesn't allow
+// changing name, language, or the WABA a template belongs to after creation,
+// so those aren't accepted here (the existing template's numberId is reused).
+const editTemplateSchema = templateSchema.omit({ name: true, language: true, numberId: true });
+
 // GET /api/templates
 templatesRouter.get("/", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
@@ -214,6 +219,79 @@ templatesRouter.get("/:id", requireRole("AGENT"), async (req: AuthRequest, res, 
     });
     if (!template) return res.status(404).json({ error: "Template not found" });
     res.json(template);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/templates/:id — edit content and resubmit for Meta approval.
+// Meta only accepts changes to category/components on an existing template
+// (not name/language) and treats any edit as a fresh review, so this always
+// resets status back to PENDING.
+templatesRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const template = await prisma.template.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template.metaId) {
+      return res.status(400).json({ error: "This template has no Meta template ID and can't be edited directly. Delete and recreate it instead." });
+    }
+    if (!template.numberId) {
+      return res.status(400).json({ error: "This template isn't linked to a WhatsApp number and can't be resubmitted." });
+    }
+
+    const body = editTemplateSchema.parse(req.body);
+
+    if (["IMAGE", "VIDEO", "DOCUMENT"].includes(body.headerType) && !body.headerHandle) {
+      return res.status(400).json({
+        error: "A fresh sample file is required to resubmit an IMAGE/VIDEO/DOCUMENT header — Meta's upload handles are single-use, so the original one can't be reused. Upload one before submitting.",
+      });
+    }
+
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: template.numberId, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(400).json({ error: "The WhatsApp number this template belongs to was not found" });
+
+    const accessToken = decrypt(number.accessToken);
+    const meta = new MetaApiService(accessToken, number.phoneNumberId);
+    const components = buildTemplateComponents(body);
+
+    try {
+      console.log("[Templates] Editing on Meta templateId=%s components=%s", template.metaId, JSON.stringify(components));
+      await meta.editTemplate(template.metaId, { category: body.category, components });
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { error?: { message?: string; code?: number; error_user_msg?: string } } }; message?: string };
+      const metaMsg = axErr.response?.data?.error?.error_user_msg
+        || axErr.response?.data?.error?.message
+        || axErr.message
+        || "Unknown error";
+      const metaCode = axErr.response?.data?.error?.code;
+      console.error("[Templates] Meta editTemplate failed:", JSON.stringify(axErr.response?.data || axErr.message));
+      return res.status(400).json({
+        error: `Meta rejected the resubmission: ${metaMsg}`,
+        metaCode,
+        metaDetails: axErr.response?.data,
+      });
+    }
+
+    const updated = await prisma.template.update({
+      where: { id: template.id },
+      data: {
+        status: "PENDING",
+        category: body.category,
+        headerType: body.headerType,
+        headerText: body.headerText,
+        headerUrl: body.headerUrl,
+        headerHandle: body.headerHandle,
+        body: body.body,
+        footer: body.footer,
+        buttons: (body.buttons as any) ?? null,
+      },
+    });
+
+    res.json(updated);
   } catch (err) {
     next(err);
   }

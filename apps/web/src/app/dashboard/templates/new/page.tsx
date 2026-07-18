@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -45,6 +45,9 @@ interface Button {
 
 function NewTemplatePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
+  const isEditMode = !!editId;
   const { selectedNumberId } = useSelectedNumber();
   const [buttons, setButtons] = useState<Button[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
@@ -54,9 +57,36 @@ function NewTemplatePageContent() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const mediaFileRef = useRef<HTMLInputElement>(null);
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<TemplateForm>({
+  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<TemplateForm>({
     defaultValues: { language: "en", headerType: "NONE", category: "MARKETING", numberId: selectedNumberId || "", headerUrl: "", headerHandle: "" },
   });
+
+  const { data: existingTemplate } = useQuery({
+    queryKey: ["template", editId],
+    queryFn: () => api.get(`/templates/${editId}`).then((r) => r.data),
+    enabled: isEditMode,
+  });
+
+  // Pre-fill the form once the existing template loads. headerHandle is
+  // deliberately left blank -- Meta's upload handles are single-use, so the
+  // one from the original submission can't be reused for this resubmission
+  // even if the header media itself isn't changing.
+  useEffect(() => {
+    if (!existingTemplate) return;
+    reset({
+      name: existingTemplate.name,
+      category: existingTemplate.category,
+      language: existingTemplate.language,
+      numberId: existingTemplate.numberId || "",
+      headerType: existingTemplate.headerType,
+      headerText: existingTemplate.headerText || "",
+      headerUrl: existingTemplate.headerUrl || "",
+      headerHandle: "",
+      body: existingTemplate.body,
+      footer: existingTemplate.footer || "",
+    });
+    setButtons(existingTemplate.buttons || []);
+  }, [existingTemplate, reset]);
 
   const headerType = watch("headerType");
   const body = watch("body") || "";
@@ -79,13 +109,13 @@ function NewTemplatePageContent() {
 
   const createMutation = useMutation({
     mutationFn: (d: TemplateForm & { buttons?: Button[]; bodyExamples?: Record<string, string> }) =>
-      api.post("/templates", d),
+      isEditMode ? api.put(`/templates/${editId}`, d) : api.post("/templates", d),
     onSuccess: () => {
-      toast.success("Template submitted for Meta approval");
+      toast.success(isEditMode ? "Template resubmitted for Meta approval" : "Template submitted for Meta approval");
       router.push("/dashboard/templates");
     },
     onError: (e: { response?: { data?: { error?: string } } }) => {
-      const msg = e.response?.data?.error || "Failed to create template";
+      const msg = e.response?.data?.error || (isEditMode ? "Failed to resubmit template" : "Failed to create template");
       setSubmitError(msg);
       toast.error(msg);
     },
@@ -177,7 +207,13 @@ function NewTemplatePageContent() {
       <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-5">
         <ChevronLeft className="w-4 h-4" /> Back to Templates
       </button>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Message Template</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">{isEditMode ? "Edit & Resubmit Template" : "Create Message Template"}</h1>
+      {isEditMode && (
+        <p className="text-sm text-gray-500 mb-6">
+          Name and language can't be changed after creation. Editing content resets this template to Pending review.
+        </p>
+      )}
+      {!isEditMode && <div className="mb-6" />}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
         {/* ── BASIC INFO ── */}
@@ -189,7 +225,8 @@ function NewTemplatePageContent() {
               <input
                 {...register("name", { required: true, pattern: /^[a-z0-9_]+$/ })}
                 placeholder="welcome_message"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+                disabled={isEditMode}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-gray-50 disabled:text-gray-500"
               />
               {errors.name && <p className="text-red-500 text-xs mt-0.5">Lowercase letters, numbers, underscores only</p>}
             </div>
@@ -201,13 +238,13 @@ function NewTemplatePageContent() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Language *</label>
-              <select {...register("language")} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none">
+              <select {...register("language")} disabled={isEditMode} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none disabled:bg-gray-50 disabled:text-gray-500">
                 {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Number *</label>
-              <select {...register("numberId", { required: true })} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <select {...register("numberId", { required: true })} disabled={isEditMode} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-gray-50 disabled:text-gray-500">
                 <option value="">Select...</option>
                 {numbers.filter((n: { status: string }) => n.status === "CONNECTED").map((n: { id: string; displayName: string; phoneNumber: string }) => (
                   <option key={n.id} value={n.id}>{n.displayName} ({n.phoneNumber})</option>
@@ -249,6 +286,12 @@ function NewTemplatePageContent() {
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{headerType} Header</span>
                   <span className="text-xs text-gray-400">— provide a sample file so Meta can review your template faster</span>
                 </div>
+
+                {isEditMode && !headerHandle && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                    Meta's upload handles are single-use, so you'll need to re-upload the sample file to resubmit — even if it's the same file as before.
+                  </p>
+                )}
 
                 {/* File Upload */}
                 <div>
@@ -485,7 +528,9 @@ function NewTemplatePageContent() {
             }
             className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-50"
           >
-            {createMutation.isPending ? "Submitting..." : "Submit for Approval"}
+            {createMutation.isPending
+              ? (isEditMode ? "Resubmitting..." : "Submitting...")
+              : (isEditMode ? "Resubmit for Approval" : "Submit for Approval")}
           </button>
         </div>
       </form>
@@ -496,7 +541,9 @@ function NewTemplatePageContent() {
 export default function NewTemplatePage() {
   return (
     <RoleGuard minRole="MANAGER">
-      <NewTemplatePageContent />
+      <Suspense fallback={<div className="p-6 text-sm text-gray-400">Loading…</div>}>
+        <NewTemplatePageContent />
+      </Suspense>
     </RoleGuard>
   );
 }

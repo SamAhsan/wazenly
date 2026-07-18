@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, FileText, Trash2, RefreshCw, Search, Send, X } from "lucide-react";
+import { Plus, FileText, Trash2, RefreshCw, Search, Send, X, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
@@ -243,6 +243,15 @@ function TemplatesPageContent() {
                   >
                     <Send className="w-3.5 h-3.5" /> Send
                   </button>
+                )}
+                {canManage && (
+                  <Link
+                    href={`/dashboard/templates/new?edit=${t.id}`}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors font-medium"
+                    title="Edit and resubmit for approval"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </Link>
                 )}
                 {canManage && (
                   <button
