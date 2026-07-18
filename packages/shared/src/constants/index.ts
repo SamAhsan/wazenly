@@ -29,9 +29,15 @@ export const MESSAGE_STATUSES = {
   FAILED: "FAILED",
 } as const;
 
+// Canonical lowercase forms -- matched against a trim/case-folded/punctuation-
+// stripped copy of the message body (see normalizeMessage() in
+// utils/keyword-match.ts), not the raw text, so casing and stray punctuation
+// ("Iptal!", "İPTAL", "stop.") don't prevent a match.
 export const OPT_OUT_KEYWORDS = [
-  "STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT",
   "stop", "stopall", "unsubscribe", "cancel", "end", "quit",
+  // Turkish
+  "dur", "iptal", "abonelikten çık", "abonelikten cik",
+  "aboneliği iptal et", "aboneligi iptal et", "mesaj almak istemiyorum",
 ];
 
 // Rule-based reply-interest classification (v1 heuristic, no AI) -- tunable.
@@ -48,6 +54,8 @@ export const NOT_INTERESTED_KEYWORDS = [
   "not interested", "no thanks", "no thank you", "not now",
   "not right now", "maybe later", "not for me", "no interest", "dont need",
   "don't need", "no need", "not needed", "no", "nah", "not really", "remove me",
+  // Turkish
+  "ilgilenmiyorum", "istemiyorum",
 ];
 
 export const ROLES_HIERARCHY = {

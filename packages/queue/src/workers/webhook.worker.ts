@@ -1,7 +1,7 @@
 import { Worker, Job } from "bullmq";
 import axios from "axios";
 import { prisma } from "@wazenly/db";
-import { QUEUE_NAMES, OPT_OUT_KEYWORDS } from "@wazenly/shared";
+import { QUEUE_NAMES, OPT_OUT_KEYWORDS, normalizeMessage } from "@wazenly/shared";
 import type { MetaWebhookPayload } from "@wazenly/shared";
 import { redisConnection } from "../redis";
 import { findMatchingFlowStart, executeFromNode, resumeWaitingInput } from "../services/flow-engine.service";
@@ -155,22 +155,35 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
           // dormant-detection worker's "no activity" window.
           await prisma.contact.update({ where: { id: contact.id }, data: { lastMessaged: new Date() } }).catch(() => {});
 
-          // Check opt-out, and otherwise classify reply interest (flag-only --
-          // does not affect campaign suppression, see isSuppressed()).
+          // Check opt-out, and otherwise classify reply interest. Both an
+          // explicit opt-out keyword (STOP/UNSUBSCRIBE/iptal/...) and an
+          // inferred "not interested" reply suppress the contact from future
+          // campaigns (see isSuppressed()) -- statusReason keeps them
+          // distinguishable in the dashboard.
           if (msg.type === "text") {
             const text = msg.text?.body || "";
             const sample = text.slice(0, 500);
-            if (OPT_OUT_KEYWORDS.includes(text)) {
+            if (OPT_OUT_KEYWORDS.includes(normalizeMessage(text))) {
               await prisma.contact.update({
                 where: { id: contact.id },
                 data: {
-                  optedOut: true, optedOutAt: new Date(), status: "UNSUBSCRIBED", statusChangedAt: new Date(),
+                  optedOut: true, optedOutAt: new Date(),
+                  status: "UNSUBSCRIBED", statusChangedAt: new Date(), statusReason: "Opted out via keyword reply",
                   replyIntent: "NOT_INTERESTED", replyIntentAt: new Date(), replyIntentSample: sample,
                 },
               });
             } else {
               const intent = classifyReplyIntent(text);
-              if (intent) {
+              if (intent === "NOT_INTERESTED") {
+                await prisma.contact.update({
+                  where: { id: contact.id },
+                  data: {
+                    optedOut: true, optedOutAt: new Date(),
+                    status: "UNSUBSCRIBED", statusChangedAt: new Date(), statusReason: "Marked not interested via reply",
+                    replyIntent: intent, replyIntentAt: new Date(), replyIntentSample: sample,
+                  },
+                });
+              } else if (intent) {
                 await prisma.contact.update({
                   where: { id: contact.id },
                   data: { replyIntent: intent, replyIntentAt: new Date(), replyIntentSample: sample },
