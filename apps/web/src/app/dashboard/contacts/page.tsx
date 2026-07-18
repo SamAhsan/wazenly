@@ -57,6 +57,10 @@ function ContactsPageContent() {
     queryFn: () => api.get("/contacts", { params: { q: search || undefined, status: statusFilter, replyIntent: replyIntentFilter, numberId: selectedNumberId } }).then((r) => r.data),
     placeholderData: (prev) => prev,
     enabled: !!selectedNumberId,
+    // Status changes (unsubscribed, Meta delivery restrictions, etc.) land via
+    // a background webhook worker, not a user action in this tab -- poll so
+    // they show up without a manual refresh.
+    refetchInterval: 5000,
   });
 
   const { data: lists = [] } = useQuery<ContactList[]>({
@@ -69,6 +73,7 @@ function ContactsPageContent() {
     queryKey: ["contacts", "list", activeList?.id],
     queryFn: () => api.get("/contacts", { params: { listId: activeList!.id, limit: 200 } }).then((r) => r.data),
     enabled: !!activeList,
+    refetchInterval: 5000,
   });
 
   const { data: approvedTemplates = [] } = useQuery<Template[]>({
