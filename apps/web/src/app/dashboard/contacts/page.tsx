@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw, Download } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw, Download, Pencil } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials, statusColor } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
@@ -38,6 +38,7 @@ function ContactsPageContent() {
   const [blacklistReason, setBlacklistReason] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [showCreateList, setShowCreateList] = useState(false);
+  const [editingList, setEditingList] = useState<ContactList | null>(null);
   const [activeList, setActiveList] = useState<ContactList | null>(null);
   const [showAddToList, setShowAddToList] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
@@ -84,6 +85,7 @@ function ContactsPageContent() {
 
   const { register: regContact, handleSubmit: hsContact, reset: resetContact } = useForm<{ name: string; phone: string; email?: string }>();
   const { register: regList, handleSubmit: hsList, reset: resetList } = useForm<{ name: string; description?: string }>();
+  const { register: regEditList, handleSubmit: hsEditList, reset: resetEditList } = useForm<{ name: string; description?: string }>();
 
   const addContact = useMutation({
     mutationFn: (d: { name: string; phone: string; email?: string }) => {
@@ -121,6 +123,28 @@ function ContactsPageContent() {
     mutationFn: (d: { name: string; description?: string }) => api.post("/contacts/lists", { ...d, numberId: selectedNumberId }),
     onSuccess: () => { toast.success("List created"); qc.invalidateQueries({ queryKey: ["contact-lists"] }); setShowCreateList(false); resetList(); },
     onError: () => toast.error("Failed to create list"),
+  });
+
+  const updateList = useMutation({
+    mutationFn: ({ id, ...d }: { id: string; name: string; description?: string }) => api.put(`/contacts/lists/${id}`, d),
+    onSuccess: (_res, vars) => {
+      toast.success("List updated");
+      qc.invalidateQueries({ queryKey: ["contact-lists"] });
+      setEditingList(null);
+      // Keep the detail view's header/breadcrumb in sync with the rename immediately.
+      setActiveList((prev) => (prev && prev.id === vars.id ? { ...prev, name: vars.name, description: vars.description } : prev));
+    },
+    onError: () => toast.error("Failed to update list"),
+  });
+
+  const deleteList = useMutation({
+    mutationFn: (id: string) => api.delete(`/contacts/lists/${id}`),
+    onSuccess: () => {
+      toast.success("List deleted");
+      qc.invalidateQueries({ queryKey: ["contact-lists"] });
+      setActiveList(null);
+    },
+    onError: () => toast.error("Failed to delete list"),
   });
 
   const addToList = useMutation({
@@ -454,21 +478,37 @@ function ContactsPageContent() {
           {lists.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {lists.map((l) => (
-                <button
+                <div
                   key={l.id}
                   onClick={() => setActiveList(l)}
-                  className="text-left p-5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-primary/40 hover:shadow-md transition-all"
+                  className="group relative text-left p-5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-primary/40 hover:shadow-md transition-all cursor-pointer"
                 >
+                  <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingList(l); resetEditList({ name: l.name, description: l.description || "" }); }}
+                      className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                      title="Rename list"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${l.name}"? Contacts in it won't be deleted.`)) deleteList.mutate(l.id); }}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete list"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
                       <List className="w-5 h-5 text-primary" />
                     </div>
                     <span className="text-2xl font-bold text-gray-900">{l._count?.members || 0}</span>
                   </div>
-                  <p className="font-semibold text-gray-900 text-sm">{l.name}</p>
+                  <p className="font-semibold text-gray-900 text-sm pr-14">{l.name}</p>
                   {l.description && <p className="text-xs text-gray-400 mt-1 truncate">{l.description}</p>}
                   <p className="text-xs text-gray-400 mt-2">{l._count?.members || 0} contacts</p>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -482,6 +522,20 @@ function ContactsPageContent() {
             <button onClick={() => setActiveList(null)} className="text-sm text-gray-400 hover:text-gray-700">← All Lists</button>
             <span className="text-gray-300">/</span>
             <span className="text-sm font-semibold text-gray-900">{activeList.name}</span>
+            <button
+              onClick={() => { setEditingList(activeList); resetEditList({ name: activeList.name, description: activeList.description || "" }); }}
+              className="p-1 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+              title="Rename list"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => { if (confirm(`Delete "${activeList.name}"? Contacts in it won't be deleted.`)) deleteList.mutate(activeList.id); }}
+              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              title="Delete list"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </div>
 
           <div className="flex items-center justify-between">
@@ -720,6 +774,36 @@ function ContactsPageContent() {
                 <button type="button" onClick={() => setShowCreateList(false)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
                 <button type="submit" disabled={createList.isPending} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm disabled:opacity-70">
                   {createList.isPending ? "Creating..." : "Create List"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT LIST MODAL ── */}
+      {editingList && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-gray-900">Rename List</h2>
+              <button onClick={() => setEditingList(null)}><X className="w-4 h-4 text-gray-400" /></button>
+            </div>
+            <form onSubmit={hsEditList((d) => updateList.mutate({ id: editingList.id, ...d }))} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">List Name *</label>
+                <input {...regEditList("name")} required placeholder="e.g. Test Recipients"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input {...regEditList("description")} placeholder="Optional description"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setEditingList(null)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
+                <button type="submit" disabled={updateList.isPending} className="flex-1 py-2 bg-primary text-white rounded-lg text-sm disabled:opacity-70">
+                  {updateList.isPending ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>

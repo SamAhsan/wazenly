@@ -380,6 +380,40 @@ contactsRouter.post("/lists", requireRole("AGENT"), async (req: AuthRequest, res
   }
 });
 
+// PUT /api/contacts/lists/:id — rename / edit description
+contactsRouter.put("/lists/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+  try {
+    const body = z.object({
+      name: z.string().min(2),
+      description: z.string().optional(),
+    }).parse(req.body);
+
+    const result = await prisma.contactList.updateMany({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      data: { name: body.name, description: body.description },
+    });
+    if (!result.count) return res.status(404).json({ error: "List not found" });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/contacts/lists/:id — removes the list and its memberships only;
+// the contacts themselves (and any campaign that previously used this list)
+// are untouched.
+contactsRouter.delete("/lists/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
+  try {
+    const result = await prisma.contactList.deleteMany({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!result.count) return res.status(404).json({ error: "List not found" });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/contacts/lists/:id/members
 contactsRouter.post("/lists/:listId/members", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
