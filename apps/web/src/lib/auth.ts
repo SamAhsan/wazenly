@@ -76,6 +76,7 @@ export const authOptions: NextAuthOptions = {
         token.accessToken = u.accessToken;
         token.workspaceId = u.workspaceId;
         token.role = u.role;
+        token.roleCheckedAt = Date.now();
       }
       // Lets the client push a freshly-issued token after switching companies
       // (see POST /api/workspaces/:id/switch) without a full re-login.
@@ -83,6 +84,31 @@ export const authOptions: NextAuthOptions = {
         token.accessToken = session.accessToken;
         token.workspaceId = session.workspaceId;
         token.role = session.role;
+        token.roleCheckedAt = Date.now();
+      }
+      // The role is otherwise baked into the JWT at sign-in and never
+      // changes again on its own -- so when an admin changes a teammate's
+      // role, that teammate's already-issued session kept showing the old
+      // one (stale dashboard UI) until they logged out and back in. The API
+      // itself always re-checks the live role per request (see requireRole
+      // in apps/api), so this was a UI staleness bug, not an authorization
+      // hole -- but re-poll here periodically so the dashboard catches up on
+      // its own shortly after a role change instead of requiring a re-login.
+      if (!user && trigger !== "update" && token.accessToken && token.workspaceId) {
+        const lastChecked = (token.roleCheckedAt as number) || 0;
+        if (Date.now() - lastChecked > 30_000) {
+          try {
+            const { data } = await axios.get(`${API_URL}/api/auth/me`, {
+              headers: { Authorization: `Bearer ${token.accessToken}` },
+            });
+            const ws = data.workspaces?.find((w: { id: string }) => w.id === token.workspaceId);
+            if (ws?.role) token.role = ws.role;
+          } catch {
+            // Transient failure -- keep the existing token.role rather than
+            // logging the user out over a network blip.
+          }
+          token.roleCheckedAt = Date.now();
+        }
       }
       return token;
     },

@@ -11,8 +11,15 @@ export function escapeRegex(s: string): string {
 // after a normal lowercase gets both cases right without a locale switch.
 const COMBINING_DOT_ABOVE = new RegExp("̇", "g");
 
+// Zero-width and bidi-control characters some mobile keyboards insert
+// invisibly (zero-width space U+200B, ZWNJ/ZWJ U+200C-200D, left/right-to-
+// right marks U+200E-200F, BOM U+FEFF) -- harmless to strip, but left in
+// place they can silently break an exact- or word-boundary match against a
+// clean keyword string.
+const INVISIBLE_CHARS = new RegExp("[​-‏﻿]", "g");
+
 export function foldCase(s: string): string {
-  return s.toLowerCase().replace(COMBINING_DOT_ABOVE, "");
+  return s.toLowerCase().replace(COMBINING_DOT_ABOVE, "").replace(INVISIBLE_CHARS, "");
 }
 
 // Trim + case-fold + drop trailing punctuation, for exact-phrase comparisons

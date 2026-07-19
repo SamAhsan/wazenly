@@ -19,5 +19,6 @@ declare module "next-auth/jwt" {
     accessToken?: string;
     workspaceId?: string;
     role?: string;
+    roleCheckedAt?: number;
   }
 }
