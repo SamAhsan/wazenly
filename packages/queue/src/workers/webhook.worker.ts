@@ -15,6 +15,10 @@ interface WebhookJobData {
   phoneNumberId: string;
 }
 
+interface SocketEmitter {
+  to(room: string): { emit(event: string, data: unknown): void };
+}
+
 // Meta sends message types beyond what's in the MessageType enum (e.g. new/rare
 // ones); mapping unknowns to UNKNOWN instead of passing them through raw keeps a
 // single unrecognized type from crashing the whole webhook job.
@@ -105,7 +109,7 @@ async function runFlowEngineForMessage(
   );
 }
 
-async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
+async function processWebhook(job: Job<WebhookJobData>, io?: SocketEmitter): Promise<void> {
   const { payload, phoneNumberId } = job.data;
 
   const number = await prisma.whatsAppNumber.findUnique({
@@ -236,6 +240,12 @@ async function processWebhook(job: Job<WebhookJobData>): Promise<void> {
               raw: msg as any,
             },
           });
+
+          // Lets the inbox re-sort this conversation to the top and refresh its
+          // unread badge immediately, instead of waiting for the next poll.
+          if (io) {
+            io.to(`workspace:${number.workspaceId}`).emit("message:new", { conversationId: conversation.id });
+          }
 
           await upsertDailyAnalytics(number.workspaceId, number.id, "inbound").catch(() => {});
 
@@ -426,10 +436,10 @@ async function dispatchOutboundWebhooks(
   }
 }
 
-export function createWebhookWorker() {
+export function createWebhookWorker(io?: SocketEmitter) {
   const worker = new Worker<WebhookJobData>(
     QUEUE_NAMES.WEBHOOK_PROCESSOR,
-    processWebhook,
+    (job) => processWebhook(job, io),
     { connection: redisConnection, concurrency: 10 }
   );
 

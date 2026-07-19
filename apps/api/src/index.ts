@@ -107,7 +107,7 @@ app.use(errorHandler);
 
 // Start queue workers in-process so they run whenever the API runs
 createCampaignWorker();
-createWebhookWorker();
+createWebhookWorker(io);
 createTemplateSyncWorker();
 createContactImporterWorker();
 createFlowWorker();

@@ -74,7 +74,9 @@ export default function InboxPage() {
     return () => { socket?.disconnect(); socket = null; };
   }, [session?.accessToken, selectedId, queryClient]);
 
-  // Conversations query — filtered by selected number
+  // Conversations query — filtered by selected number. The socket "message:new"
+  // handler above already invalidates this on a live reply, so the interval here
+  // is just a fallback for a missed/dropped socket event, not the primary signal.
   const { data: convData } = useQuery({
     queryKey: ["conversations", statusFilter, search, selectedNumberId],
     queryFn: () => api.get("/conversations", {
@@ -84,7 +86,7 @@ export default function InboxPage() {
         numberId: selectedNumberId || undefined,
       },
     }).then((r) => r.data),
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 
   const { data: conversation } = useQuery({
