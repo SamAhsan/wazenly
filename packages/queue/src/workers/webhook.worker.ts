@@ -163,9 +163,12 @@ async function processWebhook(job: Job<WebhookJobData>, io?: SocketEmitter): Pro
           // explicit opt-out keyword (STOP/UNSUBSCRIBE/iptal/...) and an
           // inferred "not interested" reply suppress the contact from future
           // campaigns (see isSuppressed()) -- statusReason keeps them
-          // distinguishable in the dashboard.
-          if (msg.type === "text") {
-            const text = msg.text?.body || "";
+          // distinguishable in the dashboard. Uses extractMessageText (not
+          // msg.text.body directly) so a tapped quick-reply/list button whose
+          // label is an opt-out phrase (e.g. a template's "Mesaj Almak
+          // İstemiyorum!" button) is caught too, not just typed text.
+          const text = extractMessageText(msg);
+          if (text) {
             const sample = text.slice(0, 500);
             if (OPT_OUT_KEYWORDS.includes(normalizeMessage(text))) {
               await prisma.contact.update({

@@ -356,7 +356,7 @@ campaignsRouter.get("/:id/contacts", requireRole("MANAGER"), async (req: AuthReq
       prisma.campaignContact.count({ where }),
     ]);
 
-    res.json({ data: contacts, total, page: Number(page), limit: Number(limit) });
+    res.json({ data: contacts, total, page: Number(page), limit: Number(limit), totalPages: Math.ceil(total / Number(limit)) });
   } catch (err) {
     next(err);
   }

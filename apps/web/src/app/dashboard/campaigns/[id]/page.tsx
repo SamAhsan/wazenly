@@ -1,14 +1,15 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ChevronLeft, Pause, Play, X, Download, Users, Send, CheckCircle2, Eye, AlertCircle } from "lucide-react";
+import { ChevronLeft, Pause, Play, X, Download, Users, Send, CheckCircle2, Eye, AlertCircle, Loader2 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 import api from "@/lib/api";
 import { formatNumber, pct, formatDateTime, statusColor } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { useInfiniteScrollTrigger } from "@/hooks/useInfiniteScrollTrigger";
 
 function CampaignDetailPageContent() {
   const { id } = useParams<{ id: string }>();
@@ -20,10 +21,16 @@ function CampaignDetailPageContent() {
     refetchInterval: 5000,
   });
 
-  const { data: contacts } = useQuery({
+  const {
+    data: contactsPages, fetchNextPage: fetchNextContactsPage, hasNextPage: hasNextContactsPage, isFetchingNextPage: isFetchingNextContactsPage,
+  } = useInfiniteQuery({
     queryKey: ["campaign-contacts", id],
-    queryFn: () => api.get(`/campaigns/${id}/contacts`).then((r) => r.data),
+    queryFn: ({ pageParam }) => api.get(`/campaigns/${id}/contacts`, { params: { page: pageParam, limit: 50 } }).then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
   });
+  const campaignContacts = contactsPages?.pages.flatMap((p) => p.data) || [];
+  const contactsLoadMoreRef = useInfiniteScrollTrigger(() => fetchNextContactsPage(), !!hasNextContactsPage && !isFetchingNextContactsPage);
 
   const pauseMutation = useMutation({
     mutationFn: () => api.post(`/campaigns/${id}/pause`),
@@ -113,7 +120,7 @@ function CampaignDetailPageContent() {
             <h3 className="font-semibold text-gray-900">Contact Status</h3>
             <button
               onClick={() => {
-                const rows = contacts?.data || [];
+                const rows = campaignContacts;
                 if (!rows.length) return;
                 const header = "Phone,Status,Sent At,Read At,Error";
                 const csv = [header, ...rows.map((cc: { phone: string; status: string; sentAt: string | null; readAt: string | null; errorMessage: string | null }) =>
@@ -143,7 +150,7 @@ function CampaignDetailPageContent() {
                 </tr>
               </thead>
               <tbody>
-                {(contacts?.data || []).slice(0, 20).map((cc: { id: string; phone: string; status: string; sentAt: string | null; readAt: string | null; errorMessage: string | null }) => (
+                {campaignContacts.map((cc: { id: string; phone: string; status: string; sentAt: string | null; readAt: string | null; errorMessage: string | null }) => (
                   <tr key={cc.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="px-4 py-3 font-mono text-xs">{cc.phone}</td>
                     <td className="px-4 py-3">
@@ -155,6 +162,11 @@ function CampaignDetailPageContent() {
                 ))}
               </tbody>
             </table>
+            {hasNextContactsPage && (
+              <div ref={contactsLoadMoreRef} className="py-3 flex items-center justify-center">
+                {isFetchingNextContactsPage && <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
+              </div>
+            )}
           </div>
         </div>
       </div>

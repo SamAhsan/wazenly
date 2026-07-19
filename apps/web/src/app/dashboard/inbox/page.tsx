@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { io, Socket } from "socket.io-client";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
   Search, Send, MessageSquare, Check, CheckCheck, Filter,
-  MoreVertical, StickyNote, X, ArrowLeft,
+  MoreVertical, StickyNote, X, ArrowLeft, Loader2,
 } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials, cn } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
+import { useInfiniteScrollTrigger } from "@/hooks/useInfiniteScrollTrigger";
 
 let socket: Socket | null = null;
 
@@ -77,17 +78,24 @@ export default function InboxPage() {
   // Conversations query — filtered by selected number. The socket "message:new"
   // handler above already invalidates this on a live reply, so the interval here
   // is just a fallback for a missed/dropped socket event, not the primary signal.
-  const { data: convData } = useQuery({
+  const {
+    data: convData, fetchNextPage: fetchNextConvPage, hasNextPage: hasNextConvPage, isFetchingNextPage: isFetchingNextConvPage,
+  } = useInfiniteQuery({
     queryKey: ["conversations", statusFilter, search, selectedNumberId],
-    queryFn: () => api.get("/conversations", {
+    queryFn: ({ pageParam }) => api.get("/conversations", {
       params: {
         status: statusFilter !== "ALL" ? statusFilter : undefined,
         q: search || undefined,
         numberId: selectedNumberId || undefined,
+        page: pageParam,
+        limit: 30,
       },
     }).then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
     refetchInterval: 5000,
   });
+  const convLoadMoreRef = useInfiniteScrollTrigger(() => fetchNextConvPage(), !!hasNextConvPage && !isFetchingNextConvPage);
 
   const { data: conversation } = useQuery({
     queryKey: ["conversation", selectedId],
@@ -140,7 +148,7 @@ export default function InboxPage() {
     },
   });
 
-  const conversations = convData?.data || [];
+  const conversations = convData?.pages.flatMap((p) => p.data) || [];
   const messages = msgData?.data || [];
 
   function openConversation(id: string) {
@@ -238,6 +246,11 @@ export default function InboxPage() {
               </div>
             </button>
           ))}
+          {hasNextConvPage && (
+            <div ref={convLoadMoreRef} className="py-3 flex items-center justify-center">
+              {isFetchingNextConvPage && <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
+            </div>
+          )}
         </div>
       </div>
 

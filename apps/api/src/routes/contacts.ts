@@ -399,16 +399,36 @@ contactsRouter.put("/lists/:id", requireRole("AGENT"), async (req: AuthRequest, 
   }
 });
 
-// DELETE /api/contacts/lists/:id — removes the list and its memberships only;
-// the contacts themselves (and any campaign that previously used this list)
-// are untouched.
+// DELETE /api/contacts/lists/:id — permanently deletes the list AND every
+// contact that's a member of it, along with their conversations, messages,
+// and campaign-send history. This is deliberately destructive (not a soft
+// "remove from list") -- a contact belonging to more than one list is still
+// fully deleted, since there's no partial-membership concept here.
 contactsRouter.delete("/lists/:id", requireRole("AGENT"), async (req: AuthRequest, res, next) => {
   try {
-    const result = await prisma.contactList.deleteMany({
+    const list = await prisma.contactList.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
+      select: { id: true },
     });
-    if (!result.count) return res.status(404).json({ error: "List not found" });
-    res.json({ success: true });
+    if (!list) return res.status(404).json({ error: "List not found" });
+
+    const members = await prisma.contactListMember.findMany({
+      where: { listId: list.id },
+      select: { contactId: true },
+    });
+    const contactIds = members.map((m) => m.contactId);
+
+    if (contactIds.length > 0) {
+      await prisma.$transaction([
+        prisma.message.deleteMany({ where: { contactId: { in: contactIds } } }),
+        prisma.conversation.deleteMany({ where: { contactId: { in: contactIds }, workspaceId: req.workspaceId! } }),
+        prisma.campaignContact.deleteMany({ where: { contactId: { in: contactIds } } }),
+        prisma.contact.deleteMany({ where: { id: { in: contactIds }, workspaceId: req.workspaceId! } }),
+      ]);
+    }
+
+    await prisma.contactList.delete({ where: { id: list.id } });
+    res.json({ success: true, deletedContacts: contactIds.length });
   } catch (err) {
     next(err);
   }

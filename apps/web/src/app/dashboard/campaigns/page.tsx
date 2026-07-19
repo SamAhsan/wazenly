@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, RotateCcw } from "lucide-react";
+import { Plus, Megaphone, Pause, Play, Trash2, BarChart3, Search, RotateCcw, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatDateTime, formatNumber, pct } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { useInfiniteScrollTrigger } from "@/hooks/useInfiniteScrollTrigger";
 
 const STATUSES = ["ALL", "DRAFT", "SCHEDULED", "RUNNING", "PAUSED", "COMPLETED", "FAILED"];
 
@@ -18,16 +19,23 @@ function CampaignsPageContent() {
   const queryClient = useQueryClient();
   const { selectedNumber, selectedNumberId } = useSelectedNumber();
 
-  const { data, isLoading } = useQuery({
+  const {
+    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["campaigns", statusFilter, selectedNumberId],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       api.get("/campaigns", {
         params: {
           ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
           ...(selectedNumberId ? { numberId: selectedNumberId } : {}),
+          page: pageParam,
+          limit: 20,
         },
       }).then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
   });
+  const loadMoreRef = useInfiniteScrollTrigger(() => fetchNextPage(), !!hasNextPage && !isFetchingNextPage);
 
   const pauseMutation = useMutation({
     mutationFn: (id: string) => api.post(`/campaigns/${id}/pause`),
@@ -44,7 +52,7 @@ function CampaignsPageContent() {
     onSuccess: () => { toast.success("Campaign deleted"); queryClient.invalidateQueries({ queryKey: ["campaigns"] }); },
   });
 
-  const campaigns = (data?.data || []).filter((c: { name: string }) =>
+  const campaigns = (data?.pages.flatMap((p) => p.data) || []).filter((c: { name: string }) =>
     !search || c.name.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -167,6 +175,11 @@ function CampaignsPageContent() {
             </tbody>
           </table>
           </div>
+          {hasNextPage && (
+            <div ref={loadMoreRef} className="px-5 py-3 border-t border-gray-50 flex items-center justify-center">
+              {isFetchingNextPage && <Loader2 className="w-4 h-4 animate-spin text-gray-300" />}
+            </div>
+          )}
         </div>
       )}
     </div>

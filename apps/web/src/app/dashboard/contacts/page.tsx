@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw, Download, Pencil } from "lucide-react";
+import { Plus, Users, Upload, Search, Trash2, List, X, Check, Send, ShieldOff, RotateCcw, Download, Pencil, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { formatRelativeTime, getInitials, statusColor } from "@/lib/utils";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
 import { ImportWizard } from "@/components/contacts/ImportWizard";
+import { useInfiniteScrollTrigger } from "@/hooks/useInfiniteScrollTrigger";
 
 const CONTACT_STATUSES = ["ACTIVE", "UNSUBSCRIBED", "BLACKLISTED", "INVALID", "DORMANT", "FAILED_DELIVERY"];
 const REPLY_INTENTS = ["INTERESTED", "NOT_INTERESTED", "UNKNOWN"];
@@ -53,9 +54,15 @@ function ContactsPageContent() {
   const { selectedNumberId } = useSelectedNumber();
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const {
+    data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["contacts", search, statusFilter, replyIntentFilter, selectedNumberId],
-    queryFn: () => api.get("/contacts", { params: { q: search || undefined, status: statusFilter, replyIntent: replyIntentFilter, numberId: selectedNumberId } }).then((r) => r.data),
+    queryFn: ({ pageParam }) => api.get("/contacts", {
+      params: { q: search || undefined, status: statusFilter, replyIntent: replyIntentFilter, numberId: selectedNumberId, page: pageParam, limit: 50 },
+    }).then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
     placeholderData: (prev) => prev,
     enabled: !!selectedNumberId,
     // Status changes (unsubscribed, Meta delivery restrictions, etc.) land via
@@ -63,6 +70,8 @@ function ContactsPageContent() {
     // they show up without a manual refresh.
     refetchInterval: 5000,
   });
+  const contactsTotal = data?.pages[0]?.total ?? 0;
+  const loadMoreRef = useInfiniteScrollTrigger(() => fetchNextPage(), !!hasNextPage && !isFetchingNextPage);
 
   const { data: lists = [] } = useQuery<ContactList[]>({
     queryKey: ["contact-lists", selectedNumberId],
@@ -139,9 +148,11 @@ function ContactsPageContent() {
 
   const deleteList = useMutation({
     mutationFn: (id: string) => api.delete(`/contacts/lists/${id}`),
-    onSuccess: () => {
-      toast.success("List deleted");
+    onSuccess: (res) => {
+      const count = res.data?.deletedContacts ?? 0;
+      toast.success(`List deleted — removed ${count} contact${count === 1 ? "" : "s"} and their history`);
       qc.invalidateQueries({ queryKey: ["contact-lists"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
       setActiveList(null);
     },
     onError: () => toast.error("Failed to delete list"),
@@ -184,7 +195,7 @@ function ContactsPageContent() {
       toast.error(e.response?.data?.error || "Failed to send message"),
   });
 
-  const contacts: Contact[] = data?.data || [];
+  const contacts: Contact[] = data?.pages.flatMap((p) => p.data) || [];
   const listContactsData: Contact[] = listContacts?.data || [];
 
   const [exporting, setExporting] = useState(false);
@@ -238,7 +249,7 @@ function ContactsPageContent() {
           <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
           <p className="text-gray-500 text-sm mt-1">
             {selectedNumberId
-              ? `${data?.total || 0} total contacts · ${lists.length} lists`
+              ? `${contactsTotal} total contacts · ${lists.length} lists`
               : "Select a number from the top bar to view its contacts"}
           </p>
         </div>
@@ -446,9 +457,18 @@ function ContactsPageContent() {
                   ))}
                 </tbody>
               </table>
-              {data?.total > contacts.length && (
+              {hasNextPage && (
+                <div ref={loadMoreRef} className="px-5 py-3 border-t border-gray-50 text-xs text-gray-400 flex items-center justify-center gap-2">
+                  {isFetchingNextPage ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading more...</>
+                  ) : (
+                    `Showing ${contacts.length} of ${contactsTotal} contacts`
+                  )}
+                </div>
+              )}
+              {!hasNextPage && contactsTotal > 0 && (
                 <div className="px-5 py-3 border-t border-gray-50 text-xs text-gray-400">
-                  Showing {contacts.length} of {data.total} contacts
+                  Showing all {contactsTotal} contacts
                 </div>
               )}
               </div>
@@ -492,7 +512,7 @@ function ContactsPageContent() {
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${l.name}"? Contacts in it won't be deleted.`)) deleteList.mutate(l.id); }}
+                      onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${l.name}"? This permanently deletes every contact in this list, along with their conversations and message history. This cannot be undone.`)) deleteList.mutate(l.id); }}
                       className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       title="Delete list"
                     >
