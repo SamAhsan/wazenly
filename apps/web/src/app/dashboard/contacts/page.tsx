@@ -428,11 +428,11 @@ function ContactsPageContent() {
                               <Send className="w-4 h-4" />
                             </button>
                           )}
-                          {c.status === "BLACKLISTED" ? (
+                          {c.status !== "ACTIVE" ? (
                             <button
                               onClick={() => reactivateContact.mutate(c.id)}
                               className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              title="Reactivate"
+                              title="Reactivate (set back to Active)"
                             >
                               <RotateCcw className="w-4 h-4" />
                             </button>
