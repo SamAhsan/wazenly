@@ -671,9 +671,10 @@ function ContactsPageContent() {
             </div>
             <form onSubmit={hsContact((d) => addContact.mutate(d))} className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <input {...regContact("name")} required placeholder="John Smith"
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input {...regContact("name")} placeholder="John Smith"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <p className="text-xs text-gray-400 mt-0.5">Leave blank to use the phone number as the display name.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone (with country code)</label>

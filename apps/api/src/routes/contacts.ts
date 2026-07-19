@@ -66,7 +66,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 
 const contactSchema = z.object({
   numberId: z.string(),
-  name: z.string().min(1),
+  name: z.string().optional(),
   phone: z.string(),
   email: z.preprocess((v) => v === "" ? undefined : v, z.string().email().optional()),
   tags: z.array(z.string()).optional(),
@@ -164,11 +164,12 @@ contactsRouter.post("/", requireRole("AGENT"), async (req: AuthRequest, res, nex
     const body = contactSchema.parse(req.body);
     const phone = normalizePhone(body.phone);
     if (!isValidPhone(phone)) return res.status(400).json({ error: "Invalid phone number" });
+    const name = body.name?.trim() || phone;
 
     const contact = await prisma.contact.upsert({
       where: { workspaceId_numberId_phone: { workspaceId: req.workspaceId!, numberId: body.numberId, phone } },
-      create: { workspaceId: req.workspaceId!, numberId: body.numberId, name: body.name, phone, email: body.email, tags: body.tags, customFields: body.customFields as any },
-      update: { name: body.name, email: body.email, tags: body.tags, customFields: body.customFields as any },
+      create: { workspaceId: req.workspaceId!, numberId: body.numberId, name, phone, email: body.email, tags: body.tags, customFields: body.customFields as any },
+      update: { name, email: body.email, tags: body.tags, customFields: body.customFields as any },
     });
 
     res.status(201).json(contact);
