@@ -407,6 +407,8 @@ templatesRouter.post("/sync", requireRole("MANAGER"), async (req: AuthRequest, r
       synced++;
     }
 
+    await prisma.whatsAppNumber.update({ where: { id: numberId }, data: { lastSyncAt: new Date() } }).catch(() => {});
+
     res.json({ success: true, synced, message: `Synced ${synced} template${synced !== 1 ? "s" : ""}` });
   } catch (err) {
     next(err);

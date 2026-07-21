@@ -81,6 +81,7 @@ export class MetaApiService {
     verified_name: string;
     quality_rating: string;
     platform_type: string;
+    messaging_limit_tier?: string;
   }> {
     const response = await axios.get(
       `${META_GRAPH_URL}/${this.phoneNumberId}`,
@@ -101,6 +102,10 @@ export class MetaApiService {
         params: { callback_url: callbackUrl, verify_token: verifyToken, subscribed_fields: "messages" },
       }
     );
+  }
+
+  async unsubscribeWebhook(wabaId: string): Promise<void> {
+    await axios.delete(`${META_GRAPH_URL}/${wabaId}/subscribed_apps`, { headers: this.headers });
   }
 
   async getTemplates(wabaId: string): Promise<object[]> {
@@ -171,4 +176,61 @@ export class MetaApiService {
       { headers: this.headers }
     );
   }
+
+  // Required before a Cloud API phone number can send/receive for the first
+  // time (Embedded Signup hands over a WABA/number, not a pre-registered
+  // one). The PIN is generated fresh per call and never needs to be reused.
+  async registerPhoneNumber(pin: string): Promise<void> {
+    await axios.post(
+      `${META_GRAPH_URL}/${this.phoneNumberId}/register`,
+      { messaging_product: "whatsapp", pin },
+      { headers: this.headers }
+    );
+  }
+
+  async getWabaInfo(wabaId: string): Promise<{ account_review_status?: string; name?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${wabaId}`, {
+      headers: this.headers,
+      params: { fields: "account_review_status,name" },
+    });
+    return response.data;
+  }
+
+  async getBusinessInfo(businessId: string): Promise<{ name?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${businessId}`, {
+      headers: this.headers,
+      params: { fields: "name" },
+    });
+    return response.data;
+  }
+}
+
+// --- Embedded Signup OAuth exchange (app-level -- runs before we have a
+// per-number access token, so these are plain functions, not instance
+// methods). META_APP_SECRET must never be sent to the frontend.
+export async function exchangeCodeForToken(code: string): Promise<string> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      code,
+    },
+  });
+  return response.data.access_token;
+}
+
+export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      grant_type: "fb_exchange_token",
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      fb_exchange_token: shortLivedToken,
+    },
+  });
+  const expiresIn = response.data.expires_in as number; // seconds, ~60 days
+  return {
+    accessToken: response.data.access_token,
+    expiresAt: new Date(Date.now() + expiresIn * 1000),
+  };
 }

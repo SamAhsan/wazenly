@@ -14,7 +14,7 @@ async function checkNumberHealth(_job: Job): Promise<void> {
         params: { fields: "id" },
       });
       if (number.status !== "CONNECTED") {
-        await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "CONNECTED" } });
+        await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "CONNECTED", disconnectedAt: null } });
         console.log(`[NumberHealthWorker] ${number.displayName} recovered -> CONNECTED`);
       }
     } catch (err: unknown) {
@@ -29,7 +29,7 @@ async function checkNumberHealth(_job: Job): Promise<void> {
       // a healthy number disconnected.
       if (metaStatus === 401 || metaStatus === 403 || metaStatus === 404 || objectGone) {
         if (number.status !== "DISCONNECTED") {
-          await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "DISCONNECTED" } });
+          await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "DISCONNECTED", disconnectedAt: new Date() } });
           console.log(`[NumberHealthWorker] ${number.displayName} -> DISCONNECTED (Meta status ${metaStatus}${objectGone ? ", object no longer exists" : ""})`);
         }
       } else {

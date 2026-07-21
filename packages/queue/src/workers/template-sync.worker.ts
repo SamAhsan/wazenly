@@ -101,6 +101,8 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
       }
     }
 
+    await prisma.whatsAppNumber.update({ where: { id: numberId }, data: { lastSyncAt: new Date() } }).catch(() => {});
+
     console.log(`[TemplateSyncWorker] Synced ${response.data.data.length} templates for workspace ${workspaceId}`);
   } catch (err: unknown) {
     const error = err as Error;

@@ -208,6 +208,80 @@ numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res,
   }
 });
 
+// POST /api/numbers/:id/refresh-status — lightweight metadata refresh (quality
+// rating, verification status, messaging tier, display info) using the
+// already-stored token. No OAuth involved -- works the same for MANUAL and
+// EMBEDDED_SIGNUP numbers.
+numbersRouter.post("/:id/refresh-status", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+    let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
+    try {
+      metaInfo = await meta.getPhoneNumberInfo();
+    } catch {
+      return res.status(400).json({ error: "Could not refresh status from Meta. The stored access token may be invalid or expired." });
+    }
+
+    let wabaVerificationStatus = number.wabaVerificationStatus;
+    try {
+      wabaVerificationStatus = (await meta.getWabaInfo(number.wabaId)).account_review_status ?? wabaVerificationStatus;
+    } catch {
+      // keep the previously stored value
+    }
+
+    const updated = await prisma.whatsAppNumber.update({
+      where: { id: number.id },
+      data: {
+        displayName: metaInfo.verified_name,
+        phoneNumber: metaInfo.display_phone_number,
+        qualityRating: metaInfo.quality_rating,
+        metaMessagingLimitTier: metaInfo.messaging_limit_tier,
+        wabaVerificationStatus,
+        lastSyncAt: new Date(),
+      },
+    });
+
+    const { accessToken: _, ...safe } = updated;
+    res.json(safe);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/:id/disconnect — soft disconnect: unlike DELETE (which
+// hard-cascades every Message/Conversation/Campaign/Contact/Template), this
+// only flips status and unsubscribes the webhook, keeping all history intact
+// so the customer can reconnect later without losing anything.
+numbersRouter.post("/:id/disconnect", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    try {
+      const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+      await meta.unsubscribeWebhook(number.wabaId);
+    } catch (err) {
+      console.warn("[Numbers] Webhook unsubscribe failed during disconnect:", (err as Error).message);
+    }
+
+    await prisma.whatsAppNumber.update({
+      where: { id: number.id },
+      data: { status: "DISCONNECTED", disconnectedAt: new Date(), webhookSubscribed: false },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/numbers/:id/stats
 numbersRouter.get("/:id/stats", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {

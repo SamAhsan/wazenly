@@ -186,6 +186,11 @@ enum NumberTier {
   TIER_4
 }
 
+enum NumberConnectionMethod {
+  MANUAL
+  EMBEDDED_SIGNUP
+}
+
 model WhatsAppNumber {
   id                  String       @id @default(cuid())
   workspaceId         String       @unique
@@ -200,6 +205,23 @@ model WhatsAppNumber {
   tier                NumberTier   @default(TIER_1)
   dailyLimit          Int          @default(1000)
   monthlyLimit        Int          @default(30000)
+
+  // Embedded Signup — Meta-controlled vocabularies (verification status, quality
+  // rating, messaging tier) are stored as raw strings rather than Prisma enums,
+  // since Meta can add new values and a closed enum would break writes until a
+  // migration ships. connectionMethod is ours, so that one stays a real enum.
+  metaBusinessId         String?
+  businessName           String?
+  wabaVerificationStatus String?
+  qualityRating          String?
+  metaMessagingLimitTier String?
+  connectionMethod       NumberConnectionMethod @default(MANUAL)
+  tokenExpiresAt         DateTime?
+  webhookSubscribed      Boolean                @default(false)
+  lastSyncAt             DateTime?
+  connectedAt            DateTime?
+  disconnectedAt         DateTime?
+
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 

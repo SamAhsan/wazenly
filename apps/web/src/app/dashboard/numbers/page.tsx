@@ -6,10 +6,36 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook } from "lucide-react";
+import {
+  Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook,
+  Facebook, ShieldCheck, PowerOff, BadgeInfo,
+} from "lucide-react";
 import api from "@/lib/api";
-import { statusColor, formatRelativeTime } from "@/lib/utils";
+import { statusColor, formatRelativeTime, formatDateTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { FacebookEmbeddedSignupButton, EmbeddedSignupResult } from "@/components/numbers/facebook-embedded-signup-button";
+
+interface WhatsAppNumber {
+  id: string;
+  displayName: string;
+  phoneNumber: string;
+  phoneNumberId: string;
+  wabaId: string;
+  status: string;
+  tier: string;
+  createdAt: string;
+  metaBusinessId: string | null;
+  businessName: string | null;
+  wabaVerificationStatus: string | null;
+  qualityRating: string | null;
+  metaMessagingLimitTier: string | null;
+  connectionMethod: "MANUAL" | "EMBEDDED_SIGNUP";
+  tokenExpiresAt: string | null;
+  webhookSubscribed: boolean;
+  lastSyncAt: string | null;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
+}
 
 function useSyncTemplates() {
   return useMutation({
@@ -27,14 +53,67 @@ const numberSchema = z.object({
 });
 type NumberForm = z.infer<typeof numberSchema>;
 
-function EmptyState() {
+function qualityColor(rating: string | null): string {
+  const map: Record<string, string> = {
+    GREEN: "bg-green-100 text-green-700",
+    YELLOW: "bg-yellow-100 text-yellow-700",
+    RED: "bg-red-100 text-red-700",
+  };
+  return map[rating || ""] || "bg-gray-100 text-gray-500";
+}
+
+function verificationColor(status: string | null): string {
+  const map: Record<string, string> = {
+    APPROVED: "bg-green-100 text-green-700",
+    PENDING: "bg-yellow-100 text-yellow-700",
+    REJECTED: "bg-red-100 text-red-700",
+  };
+  return map[status || ""] || "bg-gray-100 text-gray-500";
+}
+
+function tokenExpiryStyle(expiresAt: string | null): string {
+  if (!expiresAt) return "text-gray-400";
+  const daysLeft = (new Date(expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  if (daysLeft <= 0) return "text-red-600 font-medium";
+  if (daysLeft <= 7) return "text-yellow-600 font-medium";
+  return "text-gray-600";
+}
+
+function EmptyState({
+  configured, appId, configId, apiVersion, onFbSuccess, onFbError, onManualClick,
+}: {
+  configured: boolean;
+  appId: string | null;
+  configId: string | null;
+  apiVersion: string;
+  onFbSuccess: (r: EmbeddedSignupResult) => void;
+  onFbError: (msg: string) => void;
+  onManualClick: () => void;
+}) {
   return (
     <div className="text-center py-20">
       <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
         <Phone className="w-8 h-8 text-gray-400" />
       </div>
       <h3 className="text-lg font-semibold text-gray-900 mb-2">No numbers connected</h3>
-      <p className="text-gray-500 text-sm max-w-sm mx-auto">Connect your WhatsApp Business number to start sending messages.</p>
+      <p className="text-gray-500 text-sm max-w-sm mx-auto mb-6">Connect your WhatsApp Business number to start sending messages.</p>
+      <div className="flex flex-col items-center gap-3">
+        {configured && appId && configId ? (
+          <FacebookEmbeddedSignupButton
+            appId={appId}
+            configId={configId}
+            apiVersion={apiVersion}
+            onSuccess={onFbSuccess}
+            onError={onFbError}
+          />
+        ) : null}
+        <button
+          onClick={onManualClick}
+          className={configured ? "text-sm text-gray-500 hover:text-primary underline" : "flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium"}
+        >
+          {configured ? "Connect manually instead" : "Connect Number"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -42,12 +121,13 @@ function EmptyState() {
 function NumbersPageContent() {
   const [showForm, setShowForm] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [disconnectId, setDisconnectId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
   const queryClient = useQueryClient();
   const syncMutation = useSyncTemplates();
 
-  const { data: numbers = [], isLoading } = useQuery({
+  const { data: numbers = [], isLoading } = useQuery<WhatsAppNumber[]>({
     queryKey: ["numbers"],
     queryFn: () => api.get("/numbers").then((r) => r.data),
   });
@@ -55,6 +135,11 @@ function NumbersPageContent() {
   const { data: webhookInfo } = useQuery({
     queryKey: ["webhook-info"],
     queryFn: () => api.get("/settings/webhook-info").then((r) => r.data),
+  });
+
+  const { data: signupConfig } = useQuery({
+    queryKey: ["embedded-signup-config"],
+    queryFn: () => api.get("/embedded-signup/config").then((r) => r.data),
   });
 
   const copy = (value: string) => { navigator.clipboard.writeText(value); toast.success("Copied!"); };
@@ -72,6 +157,45 @@ function NumbersPageContent() {
       reset();
     },
     onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Failed to connect number"),
+  });
+
+  const callbackMutation = useMutation({
+    mutationFn: (data: EmbeddedSignupResult) =>
+      api.post("/embedded-signup/callback", { code: data.code, wabaId: data.wabaId, phoneNumberId: data.phoneNumberId, businessId: data.businessId }),
+    onSuccess: () => {
+      toast.success("Number connected via Facebook!");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Facebook connect failed"),
+  });
+
+  const reconnectMutation = useMutation({
+    mutationFn: ({ numberId, data }: { numberId: string; data: EmbeddedSignupResult }) =>
+      api.post(`/embedded-signup/reconnect/${numberId}`, { code: data.code, wabaId: data.wabaId, phoneNumberId: data.phoneNumberId, businessId: data.businessId }),
+    onSuccess: () => {
+      toast.success("Number reconnected!");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Reconnect failed"),
+  });
+
+  const refreshStatusMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/numbers/${id}/refresh-status`),
+    onSuccess: () => {
+      toast.success("Status refreshed");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Failed to refresh status"),
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/numbers/${id}/disconnect`),
+    onSuccess: () => {
+      toast.success("Number disconnected — history kept, you can reconnect anytime");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+      setDisconnectId(null);
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Failed to disconnect"),
   });
 
   const deleteMutation = useMutation({
@@ -102,12 +226,14 @@ function NumbersPageContent() {
           <h1 className="text-2xl font-bold text-gray-900">Phone Numbers</h1>
           <p className="text-gray-500 text-sm mt-1">Manage your connected WhatsApp Business numbers</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" /> Connect Number
-        </button>
+        {numbers.length > 0 && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary-600 transition-colors text-sm font-medium"
+          >
+            <Plus className="w-4 h-4" /> Connect Number
+          </button>
+        )}
       </div>
 
       {/* Webhook info — same URL/token for every number, paste into Meta's App Dashboard */}
@@ -230,12 +356,28 @@ function NumbersPageContent() {
         </div>
       )}
 
-      {/* Delete confirmation */}
+      {/* Disconnect confirmation (soft — keeps history) */}
+      {disconnectId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-gray-900 mb-2">Disconnect number?</h3>
+            <p className="text-sm text-gray-500 mb-5">This stops the number from sending or receiving messages. Contacts, conversations, campaigns and templates are all kept — you can reconnect anytime.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDisconnectId(null)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
+              <button onClick={() => disconnectMutation.mutate(disconnectId)} disabled={disconnectMutation.isPending} className="flex-1 py-2 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700 disabled:opacity-70">
+                {disconnectMutation.isPending ? "Disconnecting..." : "Disconnect"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation (hard — wipes all history) */}
       {deleteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <h3 className="font-bold text-gray-900 mb-2">Delete number?</h3>
-            <p className="text-sm text-gray-500 mb-5">This will disconnect the number and stop all active campaigns. This cannot be undone.</p>
+            <h3 className="font-bold text-gray-900 mb-2">Permanently delete number?</h3>
+            <p className="text-sm text-gray-500 mb-5">This permanently deletes the number along with all its contacts, conversations, messages, campaigns and templates. This cannot be undone — use Disconnect instead if you just want to pause it.</p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
               <button onClick={() => deleteMutation.mutate(deleteId)} disabled={deleteMutation.isPending} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-70">
@@ -246,79 +388,157 @@ function NumbersPageContent() {
         </div>
       )}
 
-      {/* Numbers table */}
+      {/* Numbers */}
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => <div key={i} className="h-20 skeleton rounded-xl" />)}
         </div>
       ) : numbers.length === 0 ? (
-        <EmptyState />
+        <EmptyState
+          configured={!!signupConfig?.configured}
+          appId={signupConfig?.appId ?? null}
+          configId={signupConfig?.configId ?? null}
+          apiVersion={signupConfig?.apiVersion || "v18.0"}
+          onFbSuccess={(r) => callbackMutation.mutate(r)}
+          onFbError={(msg) => toast.error(msg)}
+          onManualClick={() => setShowForm(true)}
+        />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-100 text-xs text-gray-500 font-medium">
-                <th className="text-left px-5 py-3.5">Number</th>
-                <th className="text-left px-5 py-3.5">WABA ID</th>
-                <th className="text-left px-5 py-3.5">Status</th>
-                <th className="text-left px-5 py-3.5">Tier</th>
-                <th className="text-left px-5 py-3.5">Created</th>
-                <th className="text-right px-5 py-3.5">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {numbers.map((n: { id: string; displayName: string; phoneNumber: string; phoneNumberId: string; wabaId: string; status: string; tier: string; createdAt: string }) => (
-                <tr key={n.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
-                        <Phone className="w-4 h-4 text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{n.displayName}</p>
-                        <p className="text-xs text-gray-500 font-mono">{n.phoneNumber}</p>
-                      </div>
+        <div className="space-y-4">
+          {numbers.map((n) => (
+            <div key={n.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+                    <Phone className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900">{n.businessName || n.displayName}</p>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${statusColor(n.status)}`}>
+                        {n.status === "CONNECTED" ? <Wifi className="w-3 h-3" /> : n.status === "DISCONNECTED" ? <WifiOff className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                        {n.status}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
+                        {n.connectionMethod === "EMBEDDED_SIGNUP" ? <Facebook className="w-3 h-3" /> : <BadgeInfo className="w-3 h-3" />}
+                        {n.connectionMethod === "EMBEDDED_SIGNUP" ? "Facebook" : "Manual"}
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-5 py-4 text-xs font-mono text-gray-500">{n.wabaId}</td>
-                  <td className="px-5 py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusColor(n.status)}`}>
-                      {n.status === "CONNECTED" ? <Wifi className="w-3 h-3" /> : n.status === "DISCONNECTED" ? <WifiOff className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                      {n.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">{n.tier.replace("_", " ")}</td>
-                  <td className="px-5 py-4 text-sm text-gray-500">{formatRelativeTime(n.createdAt)}</td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => syncMutation.mutate(n.id)}
-                        disabled={syncMutation.isPending}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        title="Sync templates from Meta"
-                      >
-                        <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                      </button>
-                      <a href={`https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${n.wabaId}`} target="_blank" rel="noreferrer"
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Open in Meta">
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                      <button
-                        onClick={() => { setEditId(n.id); setEditData({ phoneNumberId: n.phoneNumberId, wabaId: n.wabaId, accessToken: "" }); }}
-                        className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                        title="Edit credentials"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <p className="text-xs text-gray-500 font-mono mt-0.5">{n.phoneNumber}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => syncMutation.mutate(n.id)}
+                    disabled={syncMutation.isPending}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Sync templates from Meta"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                  </button>
+                  <button
+                    onClick={() => refreshStatusMutation.mutate(n.id)}
+                    disabled={refreshStatusMutation.isPending}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Refresh status from Meta"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                  </button>
+                  <a href={`https://business.facebook.com/wa/manage/phone-numbers/?waba_id=${n.wabaId}`} target="_blank" rel="noreferrer"
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Open in Meta">
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                  <button
+                    onClick={() => { setEditId(n.id); setEditData({ phoneNumberId: n.phoneNumberId, wabaId: n.wabaId, accessToken: "" }); }}
+                    className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                    title="Edit credentials manually"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setDisconnectId(n.id)}
+                    className="p-1.5 text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
+                    title="Disconnect (keeps history)"
+                  >
+                    <PowerOff className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-x-6 gap-y-3 mt-4 pt-4 border-t border-gray-50 text-xs">
+                <div>
+                  <p className="text-gray-400 mb-0.5">WABA ID</p>
+                  <p className="font-mono text-gray-700">{n.wabaId}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Phone Number ID</p>
+                  <p className="font-mono text-gray-700">{n.phoneNumberId}</p>
+                </div>
+                {n.metaBusinessId && (
+                  <div>
+                    <p className="text-gray-400 mb-0.5">Business ID</p>
+                    <p className="font-mono text-gray-700">{n.metaBusinessId}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-gray-400 mb-0.5">Verification</p>
+                  <span className={`inline-block px-2 py-0.5 rounded-full font-medium ${verificationColor(n.wabaVerificationStatus)}`}>
+                    {n.wabaVerificationStatus || "Unknown"}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Quality Rating</p>
+                  <span className={`inline-block px-2 py-0.5 rounded-full font-medium ${qualityColor(n.qualityRating)}`}>
+                    {n.qualityRating || "Unknown"}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Messaging Tier</p>
+                  <p className="text-gray-700">{n.metaMessagingLimitTier?.replace(/_/g, " ") || n.tier.replace("_", " ")}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Webhook</p>
+                  <p className="text-gray-700">{n.webhookSubscribed ? "Subscribed" : "Not subscribed"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Token Expires</p>
+                  <p className={tokenExpiryStyle(n.tokenExpiresAt)}>{n.tokenExpiresAt ? formatDateTime(n.tokenExpiresAt) : "N/A"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Last Synced</p>
+                  <p className="text-gray-700">{n.lastSyncAt ? formatRelativeTime(n.lastSyncAt) : "Never"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 mb-0.5">Connected</p>
+                  <p className="text-gray-700">{formatRelativeTime(n.connectedAt || n.createdAt)}</p>
+                </div>
+              </div>
+
+              {signupConfig?.configured && signupConfig.appId && signupConfig.configId && (
+                <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between flex-wrap gap-3">
+                  <FacebookEmbeddedSignupButton
+                    appId={signupConfig.appId}
+                    configId={signupConfig.configId}
+                    apiVersion={signupConfig.apiVersion || "v18.0"}
+                    label="Reconnect"
+                    onSuccess={(r) => reconnectMutation.mutate({ numberId: n.id, data: r })}
+                    onError={(msg) => toast.error(msg)}
+                  />
+                  <button onClick={() => setDeleteId(n.id)} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-600 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete permanently
+                  </button>
+                </div>
+              )}
+              {!(signupConfig?.configured && signupConfig.appId && signupConfig.configId) && (
+                <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-end">
+                  <button onClick={() => setDeleteId(n.id)} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-600 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete permanently
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
