@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useState } from "react";
-import { signIn } from "next-auth/react";
+import { Suspense, useEffect, useState } from "react";
+import { signIn, getProviders } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -10,7 +10,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Facebook, Loader2, ShieldCheck } from "lucide-react";
 import { ChatPreview } from "@/components/marketing/ChatPreview";
 
 const schema = z.object({
@@ -28,10 +28,15 @@ function LoginFormInner() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [facebookAvailable, setFacebookAvailable] = useState(false);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+
+  useEffect(() => {
+    getProviders().then((providers) => setFacebookAvailable(!!providers?.facebook));
+  }, []);
 
   async function onSubmit(data: FormData) {
     setLoading(true);
@@ -156,10 +161,31 @@ function LoginFormInner() {
             </button>
           </form>
 
+          {facebookAvailable && !inviteToken && (
+            <>
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-xs text-gray-400">or</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+              <button
+                type="button"
+                onClick={() => signIn("facebook", { callbackUrl: "/dashboard/numbers" })}
+                className="w-full flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-medium py-3 px-4 rounded-xl transition-colors"
+              >
+                <Facebook className="w-4 h-4" /> Continue with Facebook
+              </button>
+            </>
+          )}
+
           {inviteToken ? (
             <p className="text-center text-sm text-gray-500 mt-8">
               Don&apos;t have an account yet?{" "}
               <Link href={`/auth/register?invite=${inviteToken}`} className="text-primary font-medium hover:underline">Create one to accept your invite</Link>
+            </p>
+          ) : facebookAvailable ? (
+            <p className="text-center text-xs text-gray-400 mt-8 leading-relaxed">
+              Don&apos;t have an account? Continue with Facebook above to create one, or contact your Wazenly administrator for an invite.
             </p>
           ) : (
             <p className="text-center text-xs text-gray-400 mt-8 leading-relaxed">

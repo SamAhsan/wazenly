@@ -1,6 +1,7 @@
 import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+import FacebookProvider from "next-auth/providers/facebook";
 import axios from "axios";
 
 const API_URL = process.env.API_URL || "http://localhost:4000";
@@ -46,6 +47,14 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
+    ...(process.env.FACEBOOK_CLIENT_ID && process.env.FACEBOOK_CLIENT_SECRET
+      ? [
+          FacebookProvider({
+            clientId: process.env.FACEBOOK_CLIENT_ID,
+            clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "jwt" },
   pages: {
@@ -54,7 +63,7 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ user, account }) {
-      if (account?.provider !== "google") return true;
+      if (account?.provider !== "google" && account?.provider !== "facebook") return true;
       try {
         const { data } = await axios.post(
           `${API_URL}/api/auth/oauth`,
