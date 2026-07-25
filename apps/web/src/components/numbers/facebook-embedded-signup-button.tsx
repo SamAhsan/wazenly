@@ -95,8 +95,13 @@ export function FacebookEmbeddedSignupButton({ appId, configId, apiVersion, labe
     codeRef.current = null;
     signupDataRef.current = null;
 
+    // Temporary diagnostic logging -- confirms the actual runtime value of
+    // configId/appId reaching FB.login(), since that's been questioned.
+    console.log("[EmbeddedSignup] Launching FB.login() with appId:", appId, "configId:", configId);
+
     window.FB.login(
       (response) => {
+        console.log("[EmbeddedSignup] FB.login() response:", response);
         if (response.authResponse?.code) {
           codeRef.current = response.authResponse.code;
           tryFinish();
