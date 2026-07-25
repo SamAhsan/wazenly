@@ -44,6 +44,25 @@ function LoginFormInner() {
 
   const facebookAvailable = !!fbConfig?.configured;
 
+  // Completes the sign-in once FB.login() returns a code -- kept as a plain
+  // async function called from (not passed as) the FB.login() callback below,
+  // since Facebook's SDK does a strict type check that rejects an async
+  // function passed directly as the callback ("Expression is of type
+  // asyncfunction, not function").
+  async function completeFacebookSignIn(code: string) {
+    try {
+      const result = await signIn("facebook-sdk", { code, redirect: false });
+      if (result?.error) {
+        toast.error("Facebook sign-in failed. Please try again.");
+      } else {
+        toast.success("Welcome!");
+        router.push("/dashboard/numbers");
+      }
+    } finally {
+      setFbLoading(false);
+    }
+  }
+
   function handleFacebookLogin() {
     if (!window.FB) {
       toast.error("Facebook SDK not loaded yet. Try again in a moment.");
@@ -51,22 +70,12 @@ function LoginFormInner() {
     }
     setFbLoading(true);
     window.FB.login(
-      async (response) => {
+      (response) => {
         if (!response.authResponse?.code) {
           setFbLoading(false);
           return;
         }
-        try {
-          const result = await signIn("facebook-sdk", { code: response.authResponse.code, redirect: false });
-          if (result?.error) {
-            toast.error("Facebook sign-in failed. Please try again.");
-          } else {
-            toast.success("Welcome!");
-            router.push("/dashboard/numbers");
-          }
-        } finally {
-          setFbLoading(false);
-        }
+        void completeFacebookSignIn(response.authResponse.code);
       },
       {
         config_id: fbConfig!.configId!,
