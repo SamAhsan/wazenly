@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Script from "next/script";
 import { Facebook } from "lucide-react";
+import { useFacebookSdk } from "@/hooks/useFacebookSdk";
 
 export interface EmbeddedSignupResult {
   code: string;
@@ -42,7 +42,7 @@ interface Props {
 // waba_id/phone_number_id/business_id the customer picked in the popup. Both
 // must arrive before onSuccess can fire, in either order.
 export function FacebookEmbeddedSignupButton({ appId, configId, apiVersion, label = "Connect with Facebook", disabled, onSuccess, onCancel, onError }: Props) {
-  const [sdkReady, setSdkReady] = useState(false);
+  const sdkReady = useFacebookSdk(appId, apiVersion);
   const [loading, setLoading] = useState(false);
   const signupDataRef = useRef<{ wabaId: string; phoneNumberId: string; businessId?: string } | null>(null);
   const codeRef = useRef<string | null>(null);
@@ -116,17 +116,6 @@ export function FacebookEmbeddedSignupButton({ appId, configId, apiVersion, labe
 
   return (
     <>
-      <Script
-        src="https://connect.facebook.net/en_US/sdk.js"
-        strategy="lazyOnload"
-        onReady={() => {
-          window.fbAsyncInit = () => {
-            window.FB!.init({ appId, version: apiVersion, xfbml: false, autoLogAppEvents: true });
-            setSdkReady(true);
-          };
-          if (window.FB) window.fbAsyncInit();
-        }}
-      />
       <button
         type="button"
         onClick={handleClick}

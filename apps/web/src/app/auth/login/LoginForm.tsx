@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { signIn, getProviders } from "next-auth/react";
+import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Facebook, Loader2, ShieldCheck } from "lucide-react";
 import { ChatPreview } from "@/components/marketing/ChatPreview";
+import { useFacebookSdk } from "@/hooks/useFacebookSdk";
+import api from "@/lib/api";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -28,15 +30,52 @@ function LoginFormInner() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [facebookAvailable, setFacebookAvailable] = useState(false);
+  const [fbLoading, setFbLoading] = useState(false);
+  const [fbConfig, setFbConfig] = useState<{ configured: boolean; appId: string | null; configId: string | null; apiVersion: string } | null>(null);
+  const sdkReady = useFacebookSdk(fbConfig?.configured ? fbConfig.appId : null, fbConfig?.apiVersion || "v18.0");
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
 
   useEffect(() => {
-    getProviders().then((providers) => setFacebookAvailable(!!providers?.facebook));
+    api.get("/auth/facebook-config").then((r) => setFbConfig(r.data)).catch(() => {});
   }, []);
+
+  const facebookAvailable = !!fbConfig?.configured;
+
+  function handleFacebookLogin() {
+    if (!window.FB) {
+      toast.error("Facebook SDK not loaded yet. Try again in a moment.");
+      return;
+    }
+    setFbLoading(true);
+    window.FB.login(
+      async (response) => {
+        if (!response.authResponse?.code) {
+          setFbLoading(false);
+          return;
+        }
+        try {
+          const result = await signIn("facebook-sdk", { code: response.authResponse.code, redirect: false });
+          if (result?.error) {
+            toast.error("Facebook sign-in failed. Please try again.");
+          } else {
+            toast.success("Welcome!");
+            router.push("/dashboard/numbers");
+          }
+        } finally {
+          setFbLoading(false);
+        }
+      },
+      {
+        config_id: fbConfig!.configId!,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: { version: "v4" },
+      }
+    );
+  }
 
   async function onSubmit(data: FormData) {
     setLoading(true);
@@ -170,10 +209,11 @@ function LoginFormInner() {
               </div>
               <button
                 type="button"
-                onClick={() => signIn("facebook", { callbackUrl: "/dashboard/numbers" })}
-                className="w-full flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-medium py-3 px-4 rounded-xl transition-colors"
+                onClick={handleFacebookLogin}
+                disabled={fbLoading || !sdkReady}
+                className="w-full flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-medium py-3 px-4 rounded-xl transition-colors disabled:opacity-60"
               >
-                <Facebook className="w-4 h-4" /> Continue with Facebook
+                <Facebook className="w-4 h-4" /> {fbLoading ? "Connecting..." : !sdkReady ? "Loading..." : "Continue with Facebook"}
               </button>
             </>
           )}
