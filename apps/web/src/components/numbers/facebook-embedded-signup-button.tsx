@@ -109,7 +109,7 @@ export function FacebookEmbeddedSignupButton({ appId, configId, apiVersion, labe
         config_id: configId,
         response_type: "code",
         override_default_response_type: true,
-        extras: { sessionInfoVersion: "3" },
+        extras: { version: "v4" },
       }
     );
   };

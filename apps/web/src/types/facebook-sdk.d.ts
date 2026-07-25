@@ -11,7 +11,7 @@ declare global {
           config_id: string;
           response_type: "code";
           override_default_response_type: true;
-          extras?: { setup?: object; featureType?: string; sessionInfoVersion?: string };
+          extras?: { setup?: object; featureType?: string; sessionInfoVersion?: string; version?: string };
         }
       ) => void;
     };
