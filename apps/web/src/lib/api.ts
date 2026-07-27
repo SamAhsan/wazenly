@@ -26,8 +26,11 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      if (typeof window !== "undefined") {
+    const code = error.response?.data?.error;
+    if (typeof window !== "undefined") {
+      if (code === "WORKSPACE_SUSPENDED" || code === "WORKSPACE_DELETED") {
+        window.location.href = "/dashboard/suspended";
+      } else if (code === "TOKEN_REVOKED" || code === "USER_SUSPENDED" || error.response?.status === 401) {
         window.location.href = "/auth/login";
       }
     }

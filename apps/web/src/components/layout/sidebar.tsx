@@ -6,12 +6,12 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   LayoutDashboard, MessageSquare, Megaphone, Users, FileText,
-  Workflow, Phone, BarChart3, Settings, ChevronRight, X, Activity,
+  Workflow, Phone, BarChart3, Settings, ChevronRight, X, Activity, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hasMinRole, type Role } from "@/lib/permissions";
 
-const navItems: { href: string; label: string; icon: typeof LayoutDashboard; minRole?: Role }[] = [
+const navItems: { href: string; label: string; icon: typeof LayoutDashboard; minRole?: Role; superAdminOnly?: boolean }[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, minRole: "MANAGER" },
@@ -22,6 +22,7 @@ const navItems: { href: string; label: string; icon: typeof LayoutDashboard; min
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings, minRole: "ADMIN" },
   { href: "/dashboard/admin/diagnostics", label: "Diagnostics", icon: Activity, minRole: "OWNER" },
+  { href: "/super-admin", label: "Super Admin", icon: Shield, superAdminOnly: true },
 ];
 
 interface SidebarProps {
@@ -32,7 +33,11 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const visibleNavItems = navItems.filter((item) => !item.minRole || hasMinRole(session?.role, item.minRole));
+  const visibleNavItems = navItems.filter(
+    (item) =>
+      (!item.minRole || hasMinRole(session?.role, item.minRole)) &&
+      (!item.superAdminOnly || session?.isSuperAdmin)
+  );
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -54,24 +59,26 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {visibleNavItems.map(({ href, label, icon: Icon }) => {
+        {visibleNavItems.map(({ href, label, icon: Icon, superAdminOnly }) => {
           const isActive = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
           return (
-            <Link
-              key={href}
-              href={href}
-              onClick={onMobileClose}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
-                isActive
-                  ? "bg-primary text-white"
-                  : "text-slate-400 hover:bg-sidebar-accent hover:text-white"
-              )}
-            >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              <span className="flex-1">{label}</span>
-              {isActive && <ChevronRight className="w-3 h-3 opacity-60" />}
-            </Link>
+            <div key={href}>
+              {superAdminOnly && <div className="my-2 border-t border-sidebar-border" />}
+              <Link
+                href={href}
+                onClick={onMobileClose}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
+                  isActive
+                    ? "bg-primary text-white"
+                    : "text-slate-400 hover:bg-sidebar-accent hover:text-white"
+                )}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span className="flex-1">{label}</span>
+                {isActive && <ChevronRight className="w-3 h-3 opacity-60" />}
+              </Link>
+            </div>
           );
         })}
       </nav>

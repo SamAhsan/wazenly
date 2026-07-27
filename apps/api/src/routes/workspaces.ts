@@ -14,10 +14,17 @@ workspacesRouter.post("/:id/switch", async (req: AuthRequest, res, next) => {
   try {
     const member = await prisma.workspaceMember.findFirst({
       where: { workspaceId: req.params.id, userId: req.userId! },
+      include: { user: { select: { tokenVersion: true } }, workspace: { select: { status: true } } },
     });
     if (!member) return res.status(403).json({ error: "You are not a member of this company" });
+    if (member.workspace.status === "SUSPENDED") {
+      return res.status(403).json({ error: "WORKSPACE_SUSPENDED", message: "This company's account has been suspended." });
+    }
+    if (member.workspace.status === "DELETED") {
+      return res.status(403).json({ error: "WORKSPACE_DELETED", message: "This company's account is no longer active." });
+    }
 
-    const token = createToken(req.userId!, req.params.id);
+    const token = createToken(req.userId!, req.params.id, member.user.tokenVersion);
     res.json({ token, workspaceId: req.params.id, role: member.role });
   } catch (err) {
     next(err);
