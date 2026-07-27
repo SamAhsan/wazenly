@@ -8,8 +8,12 @@ async function checkNumberHealth(_job: Job): Promise<void> {
   const numbers = await prisma.whatsAppNumber.findMany();
 
   for (const number of numbers) {
-    const headers = { Authorization: `Bearer ${decrypt(number.accessToken)}` };
     try {
+      // decrypt() itself can throw synchronously (e.g. a token encrypted
+      // under a different ENCRYPTION_KEY than this environment's) -- it must
+      // stay inside this try so one bad number doesn't abort the whole loop
+      // and skip every number after it.
+      const headers = { Authorization: `Bearer ${decrypt(number.accessToken)}` };
       // Full field fetch (not just fields=id) -- a merely *restricted* number
       // still returns 200 here (restriction blocks sending, not reading the
       // object), so quality_rating/messaging_limit_tier are the only signals

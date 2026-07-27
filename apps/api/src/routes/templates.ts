@@ -355,14 +355,16 @@ templatesRouter.post("/sync", requireRole("MANAGER"), async (req: AuthRequest, r
     });
     if (!number) return res.status(404).json({ error: "Number not found" });
 
-    const accessToken = decrypt(number.accessToken);
-    const meta = new MetaApiService(accessToken, number.phoneNumberId);
-
     let rawTemplates: object[];
     try {
+      // decrypt() itself can throw (e.g. a token encrypted under a different
+      // ENCRYPTION_KEY than this environment's) -- needs the same clean error
+      // response as a rejected Meta API call, not an unhandled 500.
+      const accessToken = decrypt(number.accessToken);
+      const meta = new MetaApiService(accessToken, number.phoneNumberId);
       rawTemplates = await meta.getTemplates(number.wabaId);
     } catch {
-      return res.status(400).json({ error: "Failed to fetch templates from Meta. Check your access token." });
+      return res.status(400).json({ error: "Failed to fetch templates from Meta. The stored access token may be invalid, expired, or encrypted with a different key than this environment's." });
     }
 
     let synced = 0;

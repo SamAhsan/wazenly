@@ -221,12 +221,17 @@ numbersRouter.post("/:id/refresh-status", requireRole("MANAGER"), async (req: Au
     });
     if (!number) return res.status(404).json({ error: "Number not found" });
 
-    const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
-    let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
+    let metaInfo: Awaited<ReturnType<InstanceType<typeof MetaApiService>["getPhoneNumberInfo"]>>;
+    let meta: MetaApiService;
     try {
+      // decrypt() itself can throw (e.g. this token was encrypted under a
+      // different ENCRYPTION_KEY than the one currently configured) -- that
+      // needs the same clean error response as a rejected Meta API call,
+      // not an unhandled 500.
+      meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
       metaInfo = await meta.getPhoneNumberInfo();
     } catch {
-      return res.status(400).json({ error: "Could not refresh status from Meta. The stored access token may be invalid or expired." });
+      return res.status(400).json({ error: "Could not refresh status from Meta. The stored access token may be invalid, expired, or encrypted with a different key than this environment's." });
     }
 
     let wabaVerificationStatus = number.wabaVerificationStatus;
