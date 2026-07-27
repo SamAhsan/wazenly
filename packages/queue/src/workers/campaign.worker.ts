@@ -145,7 +145,22 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
     return;
   }
 
-  const accessToken = decrypt(campaign.number.accessToken);
+  let accessToken: string;
+  try {
+    // decrypt() can throw (e.g. this number's token was encrypted under a
+    // different ENCRYPTION_KEY than this environment's). Left unguarded, this
+    // crashes the whole batch before any contact is touched or the campaign
+    // marked FAILED -- contacts are then stuck at QUEUED forever with no
+    // error visible anywhere, since BullMQ silently exhausts its retries.
+    accessToken = decrypt(campaign.number.accessToken);
+  } catch (err) {
+    console.error(`[Campaign ${campaignId}] Could not decrypt access token for number ${campaign.number.displayName} — marking campaign FAILED:`, (err as Error).message);
+    await prisma.campaign.update({
+      where: { id: campaignId },
+      data: { status: "FAILED" },
+    });
+    return;
+  }
   const phoneNumberId = campaign.number.phoneNumberId;
 
   const contacts = await prisma.campaignContact.findMany({
