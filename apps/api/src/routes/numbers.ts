@@ -89,6 +89,9 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
         metaAppId,
         webhookVerifyToken: verifyToken,
         status: "CONNECTED",
+        qualityRating: metaInfo.quality_rating,
+        metaMessagingLimitTier: metaInfo.messaging_limit_tier,
+        lastHealthCheckAt: new Date(),
       },
     });
 
@@ -203,6 +206,51 @@ numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res,
     ]);
 
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/:id/refresh-status — on-demand version of what the 30-min
+// background health check already does: re-fetch quality rating, messaging
+// tier, and WABA verification status from Meta using the stored token.
+numbersRouter.post("/:id/refresh-status", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+    let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
+    try {
+      metaInfo = await meta.getPhoneNumberInfo();
+    } catch {
+      return res.status(400).json({ error: "Could not refresh status from Meta. The stored access token may be invalid or expired." });
+    }
+
+    let wabaVerificationStatus = number.wabaVerificationStatus;
+    try {
+      wabaVerificationStatus = (await meta.getWabaInfo(number.wabaId)).account_review_status ?? wabaVerificationStatus;
+    } catch {
+      // Keep the previously stored value if this specific call fails.
+    }
+
+    const updated = await prisma.whatsAppNumber.update({
+      where: { id: number.id },
+      data: {
+        displayName: metaInfo.verified_name,
+        phoneNumber: metaInfo.display_phone_number,
+        status: "CONNECTED",
+        qualityRating: metaInfo.quality_rating,
+        metaMessagingLimitTier: metaInfo.messaging_limit_tier,
+        wabaVerificationStatus,
+        lastHealthCheckAt: new Date(),
+      },
+    });
+
+    const { accessToken: _, ...safe } = updated;
+    res.json(safe);
   } catch (err) {
     next(err);
   }

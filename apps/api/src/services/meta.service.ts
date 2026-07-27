@@ -81,6 +81,7 @@ export class MetaApiService {
     verified_name: string;
     quality_rating: string;
     platform_type: string;
+    messaging_limit_tier?: string;
   }> {
     const response = await axios.get(
       `${META_GRAPH_URL}/${this.phoneNumberId}`,
@@ -89,6 +90,16 @@ export class MetaApiService {
         params: { fields: "id,display_phone_number,verified_name,quality_rating,platform_type,messaging_limit_tier" },
       }
     );
+    return response.data;
+  }
+
+  // account_review_status is the WABA's verification state (APPROVED/PENDING/
+  // REJECTED) -- a separate signal from the phone number's own quality_rating.
+  async getWabaInfo(wabaId: string): Promise<{ account_review_status?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${wabaId}`, {
+      headers: this.headers,
+      params: { fields: "account_review_status" },
+    });
     return response.data;
   }
 

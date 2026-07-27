@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook } from "lucide-react";
+import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook, ShieldCheck } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
@@ -18,6 +18,28 @@ function useSyncTemplates() {
     onError: (e: { response?: { data?: { error?: string } } }) =>
       toast.error(e.response?.data?.error || "Failed to sync templates"),
   });
+}
+
+function useRefreshStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (numberId: string) => api.post(`/numbers/${numberId}/refresh-status`),
+    onSuccess: () => {
+      toast.success("Status refreshed from Meta");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to refresh status"),
+  });
+}
+
+function qualityColor(rating: string | null): string {
+  const map: Record<string, string> = {
+    GREEN: "bg-green-100 text-green-700",
+    YELLOW: "bg-yellow-100 text-yellow-700",
+    RED: "bg-red-100 text-red-700",
+  };
+  return map[rating || ""] || "bg-gray-100 text-gray-500";
 }
 
 const numberSchema = z.object({
@@ -46,10 +68,15 @@ function NumbersPageContent() {
   const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
   const queryClient = useQueryClient();
   const syncMutation = useSyncTemplates();
+  const refreshStatusMutation = useRefreshStatus();
 
   const { data: numbers = [], isLoading } = useQuery({
     queryKey: ["numbers"],
     queryFn: () => api.get("/numbers").then((r) => r.data),
+    // A number's connectivity/quality can change on Meta's side at any time
+    // (disconnected, restricted); poll so that shows up without a manual
+    // page reload, same pattern as the background health check (every 30min).
+    refetchInterval: 30000,
   });
 
   const { data: webhookInfo } = useQuery({
@@ -255,19 +282,22 @@ function NumbersPageContent() {
         <EmptyState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-gray-100 text-xs text-gray-500 font-medium">
                 <th className="text-left px-5 py-3.5">Number</th>
                 <th className="text-left px-5 py-3.5">WABA ID</th>
                 <th className="text-left px-5 py-3.5">Status</th>
+                <th className="text-left px-5 py-3.5">Quality</th>
+                <th className="text-left px-5 py-3.5">Verification</th>
                 <th className="text-left px-5 py-3.5">Tier</th>
-                <th className="text-left px-5 py-3.5">Created</th>
+                <th className="text-left px-5 py-3.5">Last Checked</th>
                 <th className="text-right px-5 py-3.5">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {numbers.map((n: { id: string; displayName: string; phoneNumber: string; phoneNumberId: string; wabaId: string; status: string; tier: string; createdAt: string }) => (
+              {numbers.map((n: { id: string; displayName: string; phoneNumber: string; phoneNumberId: string; wabaId: string; status: string; tier: string; createdAt: string; qualityRating: string | null; wabaVerificationStatus: string | null; metaMessagingLimitTier: string | null; lastHealthCheckAt: string | null }) => (
                 <tr key={n.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
@@ -287,10 +317,24 @@ function NumbersPageContent() {
                       {n.status}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">{n.tier.replace("_", " ")}</td>
-                  <td className="px-5 py-4 text-sm text-gray-500">{formatRelativeTime(n.createdAt)}</td>
+                  <td className="px-5 py-4">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${qualityColor(n.qualityRating)}`}>
+                      {n.qualityRating || "Unknown"}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 text-sm text-gray-600">{n.wabaVerificationStatus || "Unknown"}</td>
+                  <td className="px-5 py-4 text-sm text-gray-600">{(n.metaMessagingLimitTier || n.tier).replace(/_/g, " ")}</td>
+                  <td className="px-5 py-4 text-sm text-gray-500">{n.lastHealthCheckAt ? formatRelativeTime(n.lastHealthCheckAt) : "Never"}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => refreshStatusMutation.mutate(n.id)}
+                        disabled={refreshStatusMutation.isPending}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Refresh status from Meta"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => syncMutation.mutate(n.id)}
                         disabled={syncMutation.isPending}
@@ -319,6 +363,7 @@ function NumbersPageContent() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
