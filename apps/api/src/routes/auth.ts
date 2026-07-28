@@ -2,11 +2,14 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import axios from "axios";
 import { z } from "zod";
 import { prisma, Prisma } from "@wazenly/db";
 import { authRateLimiter } from "../middleware/rate-limiter";
 import { sendMail } from "../services/mailer.service";
 import { verificationEmail, passwordResetEmail } from "../services/email-templates";
+import { exchangeCodeForToken, exchangeForLongLivedToken } from "../services/meta.service";
+import { META_GRAPH_URL, META_API_VERSION } from "@wazenly/shared";
 
 export const authRouter = Router();
 
@@ -260,6 +263,64 @@ authRouter.post("/resend-verification", authRateLimiter, async (req, res, next) 
   }
 });
 
+// GET /api/auth/facebook-config — public, non-secret bootstrap info for the
+// login page's FB.init()/FB.login() calls. No auth middleware -- this has to
+// work before any session exists. Reuses the same Meta App/Configuration as
+// WhatsApp Embedded Signup (one config_id for both, per current setup).
+authRouter.get("/facebook-config", async (_req, res, next) => {
+  try {
+    const appId = process.env.META_APP_ID || null;
+    const configId = process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || null;
+    res.json({
+      configured: !!(appId && configId),
+      appId,
+      configId,
+      apiVersion: META_API_VERSION,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Shared by /oauth (Google, via NextAuth's built-in provider) and /facebook-login
+// (Facebook, via the SDK-based exchange below) -- both resolve to "find or create
+// a user by email, find or create their first workspace, issue a token."
+async function findOrCreateOAuthAccount(email: string, name?: string | null, image?: string | null) {
+  let user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    user = await prisma.user.create({
+      data: { email, name: name || undefined, image: image || undefined, emailVerified: new Date() },
+    });
+  } else if (!user.emailVerified) {
+    user = await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } });
+  }
+
+  let membership = await prisma.workspaceMember.findFirst({
+    where: { userId: user.id },
+    include: { workspace: true },
+    orderBy: { invitedAt: "asc" },
+  });
+
+  if (!membership) {
+    const workspace = await prisma.$transaction((tx) =>
+      createDefaultWorkspace(tx, user!.id, `${name || email.split("@")[0]}'s Workspace`)
+    );
+    membership = await prisma.workspaceMember.findFirstOrThrow({
+      where: { workspaceId: workspace.id, userId: user.id },
+      include: { workspace: true },
+    });
+  }
+
+  const token = createToken(user.id, membership.workspaceId, user.tokenVersion);
+  return {
+    token,
+    user: { id: user.id, email: user.email, name: user.name },
+    workspace: membership.workspace,
+    role: membership.role,
+    isSuperAdmin: user.isSuperAdmin,
+  };
+}
+
 // POST /api/auth/oauth — internal, called only by the web app's NextAuth callbacks
 authRouter.post("/oauth", async (req, res, next) => {
   try {
@@ -273,33 +334,41 @@ authRouter.post("/oauth", async (req, res, next) => {
       image: z.string().nullish(),
     }).parse(req.body);
 
-    let user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: { email: body.email, name: body.name || undefined, image: body.image || undefined, emailVerified: new Date() },
-      });
-    } else if (!user.emailVerified) {
-      user = await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } });
+    const result = await findOrCreateOAuthAccount(body.email, body.name, body.image);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/facebook-login — internal, called only by the web app's NextAuth
+// "facebook-sdk" credentials provider. Meta blocks the classic redirect-based
+// dialog/oauth login for this app, so login goes through the same FB.login() +
+// config_id mechanism as WhatsApp Embedded Signup instead: the frontend gets a
+// `code` from FB.login(), we exchange it server-side and fetch the profile.
+authRouter.post("/facebook-login", async (req, res, next) => {
+  try {
+    if (req.headers["x-internal-secret"] !== process.env.INTERNAL_SERVICE_SECRET) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    let membership = await prisma.workspaceMember.findFirst({
-      where: { userId: user.id },
-      include: { workspace: true },
-      orderBy: { invitedAt: "asc" },
+    const { code } = z.object({ code: z.string().min(1) }).parse(req.body);
+
+    const shortLivedToken = await exchangeCodeForToken(code);
+    const { accessToken } = await exchangeForLongLivedToken(shortLivedToken);
+
+    const profile = await axios.get(`${META_GRAPH_URL}/me`, {
+      params: { fields: "id,name,email,picture", access_token: accessToken },
     });
 
-    if (!membership) {
-      const workspace = await prisma.$transaction((tx) =>
-        createDefaultWorkspace(tx, user!.id, `${body.name || body.email.split("@")[0]}'s Workspace`)
-      );
-      membership = await prisma.workspaceMember.findFirstOrThrow({
-        where: { workspaceId: workspace.id, userId: user.id },
-        include: { workspace: true },
+    if (!profile.data.email) {
+      return res.status(400).json({
+        error: "Your Facebook account didn't share an email address, which Wazenly requires to create an account. Please try again and allow email access.",
       });
     }
 
-    const token = createToken(user.id, membership.workspaceId, user.tokenVersion);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name }, workspace: membership.workspace, role: membership.role, isSuperAdmin: user.isSuperAdmin });
+    const result = await findOrCreateOAuthAccount(profile.data.email, profile.data.name, profile.data.picture?.data?.url);
+    res.json(result);
   } catch (err) {
     next(err);
   }

@@ -183,3 +183,33 @@ export class MetaApiService {
     );
   }
 }
+
+// --- Embedded Signup / Facebook Login OAuth exchange (app-level -- runs before
+// we have a per-number access token, so these are plain functions, not instance
+// methods). META_APP_SECRET must never be sent to the frontend.
+export async function exchangeCodeForToken(code: string): Promise<string> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      code,
+    },
+  });
+  return response.data.access_token;
+}
+
+export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      grant_type: "fb_exchange_token",
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      fb_exchange_token: shortLivedToken,
+    },
+  });
+  const expiresIn = response.data.expires_in as number; // seconds, ~60 days
+  return {
+    accessToken: response.data.access_token,
+    expiresAt: new Date(Date.now() + expiresIn * 1000),
+  };
+}

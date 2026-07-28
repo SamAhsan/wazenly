@@ -47,6 +47,39 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
+    // Facebook login goes through the FB JS SDK (FB.login() + config_id), the
+    // same mechanism as WhatsApp Embedded Signup -- Meta blocks the classic
+    // redirect-based dialog/oauth flow for this app, so there's no ordinary
+    // OAuth provider here. The frontend gets a `code` from FB.login() and
+    // passes it straight through; the API does the actual code exchange.
+    CredentialsProvider({
+      id: "facebook-sdk",
+      name: "Facebook",
+      credentials: { code: { label: "code", type: "text" } },
+      async authorize(credentials) {
+        try {
+          const { data } = await axios.post(
+            `${API_URL}/api/auth/facebook-login`,
+            { code: credentials?.code },
+            { headers: { "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET } }
+          );
+          if (data.token) {
+            return {
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.name,
+              accessToken: data.token,
+              workspaceId: data.workspace?.id,
+              role: data.role,
+              isSuperAdmin: data.isSuperAdmin,
+            };
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      },
+    }),
   ],
   session: { strategy: "jwt" },
   pages: {
