@@ -354,8 +354,20 @@ authRouter.post("/facebook-login", async (req, res, next) => {
 
     const { code } = z.object({ code: z.string().min(1) }).parse(req.body);
 
-    const shortLivedToken = await exchangeCodeForToken(code);
-    const { accessToken } = await exchangeForLongLivedToken(shortLivedToken);
+    let accessToken: string;
+    try {
+      const shortLivedToken = await exchangeCodeForToken(code);
+      accessToken = (await exchangeForLongLivedToken(shortLivedToken)).accessToken;
+    } catch (err) {
+      // Log Meta's actual error body -- axios's own error.message is just
+      // "Request failed with status code 400", which hides the real reason
+      // (expired/already-used code, redirect_uri mismatch, wrong app, etc.)
+      const metaError = axios.isAxiosError(err) ? err.response?.data : (err as Error).message;
+      console.error("[FacebookLogin] Code exchange failed:", JSON.stringify(metaError));
+      return res.status(400).json({
+        error: "Facebook sign-in failed during token exchange. This usually means the login code expired or was already used — please try again.",
+      });
+    }
 
     const profile = await axios.get(`${META_GRAPH_URL}/me`, {
       params: { fields: "id,name,email,picture", access_token: accessToken },
