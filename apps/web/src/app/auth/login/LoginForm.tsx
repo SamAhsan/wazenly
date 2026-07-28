@@ -35,6 +35,11 @@ function LoginFormInner() {
   const [fbLoading, setFbLoading] = useState(false);
   const [fbConfig, setFbConfig] = useState<{ configured: boolean; appId: string | null; configId: string | null; apiVersion: string } | null>(null);
   const sdkReady = useFacebookSdk(fbConfig?.configured ? fbConfig.appId : null, fbConfig?.apiVersion || "v18.0");
+  // Set once Facebook's exchange succeeds but doesn't return an email (this
+  // app's Login configuration has no email scope) -- prompts an inline
+  // "type your email" step instead of failing the sign-in outright.
+  const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
+  const [fbEmailInput, setFbEmailInput] = useState("");
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -62,8 +67,37 @@ function LoginFormInner() {
   async function completeFacebookSignIn(code: string) {
     try {
       const result = await signIn("facebook-sdk", { code, redirect: false });
-      if (result?.error) {
+      if (result?.error?.startsWith("NEEDS_EMAIL:")) {
+        setFbPendingToken(result.error.slice("NEEDS_EMAIL:".length));
+        toast.info("Facebook didn't share an email with us — enter yours below to finish signing up.");
+      } else if (result?.error === "NEEDS_VERIFICATION") {
+        toast.success("Account created! Check your email to verify, then sign in.");
+      } else if (result?.error === "EMAIL_EXISTS") {
+        toast.error("An account with this email already exists. Please sign in with your password instead.");
+      } else if (result?.error) {
         toast.error("Facebook sign-in failed. Please try again.");
+      } else {
+        toast.success("Welcome!");
+        router.push("/dashboard/numbers");
+      }
+    } finally {
+      setFbLoading(false);
+    }
+  }
+
+  async function completeWithEmail() {
+    if (!fbPendingToken || !fbEmailInput) return;
+    setFbLoading(true);
+    try {
+      const result = await signIn("facebook-sdk", { pendingToken: fbPendingToken, email: fbEmailInput, redirect: false });
+      if (result?.error === "NEEDS_VERIFICATION") {
+        toast.success("Account created! Check your email to verify, then sign in.");
+        setFbPendingToken(null);
+        setFbEmailInput("");
+      } else if (result?.error === "EMAIL_EXISTS") {
+        toast.error("An account with this email already exists. Please sign in with your password instead.");
+      } else if (result?.error) {
+        toast.error("Something went wrong. Please try again.");
       } else {
         toast.success("Welcome!");
         router.push("/dashboard/numbers");
@@ -248,7 +282,7 @@ function LoginFormInner() {
                   </button>
                 )}
 
-                {facebookAvailable && !inviteToken && (
+                {facebookAvailable && !inviteToken && !fbPendingToken && (
                   <button
                     type="button"
                     onClick={handleFacebookLogin}
@@ -257,6 +291,27 @@ function LoginFormInner() {
                   >
                     <Facebook className="w-4 h-4" /> {fbLoading ? "Connecting..." : !sdkReady ? "Loading..." : "Continue with Facebook"}
                   </button>
+                )}
+
+                {fbPendingToken && (
+                  <div className="p-3 border border-gray-200 rounded-xl space-y-2">
+                    <p className="text-xs text-gray-500">Facebook didn&apos;t share an email with us. Enter yours to finish signing up:</p>
+                    <input
+                      type="email"
+                      value={fbEmailInput}
+                      onChange={(e) => setFbEmailInput(e.target.value)}
+                      placeholder="you@company.com"
+                      className="flat-input w-full px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={completeWithEmail}
+                      disabled={fbLoading || !fbEmailInput}
+                      className="w-full bg-[#1877F2] hover:bg-[#166fe5] text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-60"
+                    >
+                      {fbLoading ? "Continuing..." : "Continue"}
+                    </button>
+                  </div>
                 )}
               </div>
             </>

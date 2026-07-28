@@ -55,14 +55,29 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       id: "facebook-sdk",
       name: "Facebook",
-      credentials: { code: { label: "code", type: "text" } },
+      credentials: {
+        code: { label: "code", type: "text" },
+        pendingToken: { label: "pendingToken", type: "text" },
+        email: { label: "email", type: "text" },
+      },
       async authorize(credentials) {
         try {
           const { data } = await axios.post(
             `${API_URL}/api/auth/facebook-login`,
-            { code: credentials?.code },
+            { code: credentials?.code, pendingToken: credentials?.pendingToken, email: credentials?.email },
             { headers: { "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET } }
           );
+          // The Meta app's Login configuration can't grant an `email` scope
+          // (it's business-asset-only) -- these two signals let the login page
+          // walk the user through supplying/verifying an email manually instead
+          // of failing outright. Encoded in the thrown error message since
+          // NextAuth's credentials authorize() can only surface a string.
+          if (data.needsEmail) {
+            throw new Error(`NEEDS_EMAIL:${data.pendingToken}`);
+          }
+          if (data.needsVerification) {
+            throw new Error("NEEDS_VERIFICATION");
+          }
           if (data.token) {
             return {
               id: data.user.id,
@@ -75,7 +90,13 @@ export const authOptions: NextAuthOptions = {
             };
           }
           return null;
-        } catch {
+        } catch (err) {
+          if (err instanceof Error && (err.message.startsWith("NEEDS_EMAIL:") || err.message === "NEEDS_VERIFICATION")) {
+            throw err;
+          }
+          if (axios.isAxiosError(err) && err.response?.status === 409) {
+            throw new Error("EMAIL_EXISTS");
+          }
           return null;
         }
       },

@@ -346,17 +346,90 @@ authRouter.post("/oauth", async (req, res, next) => {
 // dialog/oauth login for this app, so login goes through the same FB.login() +
 // config_id mechanism as WhatsApp Embedded Signup instead: the frontend gets a
 // `code` from FB.login(), we exchange it server-side and fetch the profile.
-authRouter.post("/facebook-login", async (req, res, next) => {
+authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
   try {
     if (req.headers["x-internal-secret"] !== process.env.INTERNAL_SERVICE_SECRET) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { code } = z.object({ code: z.string().min(1) }).parse(req.body);
+    const body = z.object({
+      code: z.string().min(1).optional(),
+      pendingToken: z.string().min(1).optional(),
+      email: z.string().email().optional(),
+    }).parse(req.body);
+
+    // Step 2: user manually supplied an email after Facebook didn't share one.
+    // A self-typed email is NOT proof of ownership the way Google/Facebook's
+    // own verification is -- never let it silently log someone into an
+    // existing account. Only a brand-new or already-verified-passwordless
+    // account (verified once already, via the same email-confirmation link
+    // every other signup uses) may proceed without re-proving ownership here.
+    if (body.pendingToken) {
+      if (!body.email) return res.status(400).json({ error: "Email is required." });
+
+      let decoded: { fbId: string; name?: string; picture?: string };
+      try {
+        decoded = jwt.verify(body.pendingToken, process.env.NEXTAUTH_SECRET || "secret") as {
+          fbId: string; name?: string; picture?: string;
+        };
+      } catch {
+        return res.status(400).json({ error: "This sign-in attempt expired. Please try Continue with Facebook again." });
+      }
+
+      const existing = await prisma.user.findUnique({ where: { email: body.email } });
+
+      if (existing?.password) {
+        return res.status(409).json({
+          error: "An account with this email already has a password set. Please sign in with your password instead.",
+        });
+      }
+
+      if (existing?.emailVerified) {
+        const membership = await prisma.workspaceMember.findFirst({
+          where: { userId: existing.id },
+          include: { workspace: true },
+          orderBy: { invitedAt: "asc" },
+        });
+        const token = createToken(existing.id, membership?.workspaceId, existing.tokenVersion);
+        return res.json({
+          token,
+          user: { id: existing.id, email: existing.email, name: existing.name },
+          workspace: membership?.workspace,
+          role: membership?.role,
+          isSuperAdmin: existing.isSuperAdmin,
+        });
+      }
+
+      if (!existing) {
+        await prisma.$transaction(async (tx) => {
+          const newUser = await tx.user.create({
+            data: { email: body.email!, name: decoded.name || undefined, image: decoded.picture || undefined },
+          });
+          await createDefaultWorkspace(tx, newUser.id, `${decoded.name || body.email!.split("@")[0]}'s Workspace`);
+        });
+      }
+
+      // Either a brand-new account, or an existing-but-unverified one (they
+      // started this before but never clicked the link) -- (re)send
+      // verification and stop here instead of granting access on an unproven email.
+      try {
+        await issueVerificationEmail(body.email, decoded.name || null);
+      } catch (mailErr) {
+        console.error("[FacebookLogin] Failed to send verification email:", mailErr);
+      }
+
+      return res.json({
+        needsVerification: true,
+        message: "Check your email to verify your account, then click Continue with Facebook again to finish signing in.",
+      });
+    }
+
+    // Step 1: normal code exchange.
+    if (!body.code) return res.status(400).json({ error: "Missing code" });
 
     let accessToken: string;
     try {
-      const shortLivedToken = await exchangeCodeForToken(code);
+      const shortLivedToken = await exchangeCodeForToken(body.code);
       accessToken = (await exchangeForLongLivedToken(shortLivedToken)).accessToken;
     } catch (err) {
       // Log Meta's actual error body -- axios's own error.message is just
@@ -374,9 +447,12 @@ authRouter.post("/facebook-login", async (req, res, next) => {
     });
 
     if (!profile.data.email) {
-      return res.status(400).json({
-        error: "Your Facebook account didn't share an email address, which Wazenly requires to create an account. Please try again and allow email access.",
-      });
+      const pendingToken = jwt.sign(
+        { fbId: profile.data.id, name: profile.data.name, picture: profile.data.picture?.data?.url },
+        process.env.NEXTAUTH_SECRET || "secret",
+        { expiresIn: "10m" }
+      );
+      return res.json({ needsEmail: true, pendingToken });
     }
 
     const result = await findOrCreateOAuthAccount(profile.data.email, profile.data.name, profile.data.picture?.data?.url);
