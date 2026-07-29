@@ -339,7 +339,25 @@ numbersRouter.delete("/:id", requireRole("OWNER"), async (req: AuthRequest, res,
     });
     if (!number) return res.status(404).json({ error: "Number not found" });
 
-    await prisma.workspace.delete({ where: { id: req.workspaceId! } });
+    // Message/Conversation/Campaign/Contact/ContactList/Flow/Template each
+    // reference the number via a separate numberId FK that does NOT cascade
+    // (by design, so unrelated delete paths for those models stay
+    // protected) -- deleting the workspace alone leaves those rows still
+    // pointing at the about-to-be-cascade-deleted WhatsAppNumber row and
+    // the DB rejects it with a foreign key violation. Clear them by hand
+    // first, then the workspace delete cascades everything else
+    // (WhatsAppNumber itself, members, invitations, analytics, etc.) via
+    // their workspaceId FKs, which DO cascade.
+    await prisma.$transaction([
+      prisma.message.deleteMany({ where: { numberId: number.id } }),
+      prisma.conversation.deleteMany({ where: { numberId: number.id } }),
+      prisma.campaign.deleteMany({ where: { numberId: number.id } }),
+      prisma.contact.deleteMany({ where: { numberId: number.id } }),
+      prisma.contactList.deleteMany({ where: { numberId: number.id } }),
+      prisma.flow.deleteMany({ where: { numberId: number.id } }),
+      prisma.template.deleteMany({ where: { numberId: number.id } }),
+      prisma.workspace.delete({ where: { id: req.workspaceId! } }),
+    ]);
 
     res.json({ success: true });
   } catch (err) {
