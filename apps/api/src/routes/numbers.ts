@@ -321,7 +321,17 @@ numbersRouter.post("/:id/rotate-token", requireRole("ADMIN"), async (req: AuthRe
 });
 
 // DELETE /api/numbers/:id
-numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+// Every workspace holds at most one number (@unique workspaceId on
+// WhatsAppNumber) -- a number-less company has no purpose in this app, so
+// deleting the number deletes the entire company, not just the number row.
+// requireRole("OWNER") since this now removes every other teammate's access
+// too, not just a piece of Meta config -- matches DELETE /api/workspaces/:id's
+// own bar for the same reason. Deleting the workspace directly (rather than
+// hand-cascading each numberId-scoped table like before) is both simpler and
+// more complete: every workspaceId relation already has onDelete: Cascade,
+// so Prisma wipes the number, messages, conversations, campaigns, contacts,
+// templates, members, invitations, etc. in one step.
+numbersRouter.delete("/:id", requireRole("OWNER"), async (req: AuthRequest, res, next) => {
   try {
     const number = await prisma.whatsAppNumber.findFirst({
       where: { id: req.params.id, workspaceId: req.workspaceId! },
@@ -329,22 +339,7 @@ numbersRouter.delete("/:id", requireRole("ADMIN"), async (req: AuthRequest, res,
     });
     if (!number) return res.status(404).json({ error: "Number not found" });
 
-    // Campaign/Conversation/Message/Flow/Template all reference this number without
-    // a DB-level cascade (by design, so unrelated delete paths for those models stay
-    // protected). Deleting a number is a deliberate, explicit "wipe everything under
-    // it" action, so we cascade by hand here, ordered so each delete's own children
-    // (already DB-cascaded one level down, e.g. Campaign -> CampaignContact) are gone
-    // before we remove anything a sibling step still points to.
-    await prisma.$transaction([
-      prisma.message.deleteMany({ where: { numberId: number.id } }),
-      prisma.conversation.deleteMany({ where: { numberId: number.id } }),
-      prisma.campaign.deleteMany({ where: { numberId: number.id } }),
-      prisma.contact.deleteMany({ where: { numberId: number.id } }),
-      prisma.contactList.deleteMany({ where: { numberId: number.id } }),
-      prisma.flow.deleteMany({ where: { numberId: number.id } }),
-      prisma.template.deleteMany({ where: { numberId: number.id } }),
-      prisma.whatsAppNumber.delete({ where: { id: number.id } }),
-    ]);
+    await prisma.workspace.delete({ where: { id: req.workspaceId! } });
 
     res.json({ success: true });
   } catch (err) {

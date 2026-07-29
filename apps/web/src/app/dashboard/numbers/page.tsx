@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -79,7 +80,9 @@ function NumbersPageContent() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
+  const [leavingCompany, setLeavingCompany] = useState(false);
   const queryClient = useQueryClient();
+  const { data: session, update } = useSession();
   const syncMutation = useSyncTemplates();
   const refreshStatusMutation = useRefreshStatus();
   const activateMutation = useActivateNumber();
@@ -115,11 +118,34 @@ function NumbersPageContent() {
     onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Failed to connect number"),
   });
 
+  // Deleting a number now deletes the entire company (see the backend
+  // comment on DELETE /api/numbers/:id) -- the session's current workspaceId
+  // no longer exists afterward, so every other API call would start failing
+  // until it's pointed somewhere valid. Switch to another company the user
+  // belongs to if one exists; otherwise there's nothing left to switch to,
+  // so sign out and send them to create a fresh one.
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/numbers/${id}`),
-    onSuccess: () => {
-      toast.success("Number removed");
-      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    onSuccess: async () => {
+      toast.success("Company removed");
+      setDeleteId(null);
+      setLeavingCompany(true);
+      try {
+        const { data } = await api.get("/auth/me");
+        const nextWorkspace = data.workspaces?.[0];
+        if (nextWorkspace) {
+          const { data: switched } = await api.post(`/workspaces/${nextWorkspace.id}/switch`);
+          await update({ accessToken: switched.token, workspaceId: switched.workspaceId, role: switched.role });
+          window.location.href = "/dashboard";
+        } else {
+          await signOut({ callbackUrl: "/auth/register" });
+        }
+      } catch {
+        window.location.href = "/auth/login";
+      }
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => {
+      toast.error(err.response?.data?.error || "Failed to delete company");
       setDeleteId(null);
     },
   });
@@ -275,15 +301,24 @@ function NumbersPageContent() {
       {deleteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <h3 className="font-bold text-gray-900 mb-2">Delete number?</h3>
-            <p className="text-sm text-gray-500 mb-5">This will disconnect the number and stop all active campaigns. This cannot be undone.</p>
+            <h3 className="font-bold text-gray-900 mb-2">Delete this company?</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              This removes the number and permanently deletes this entire company — all campaigns, contacts, conversations, templates, and team members. This cannot be undone.
+            </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
               <button onClick={() => deleteMutation.mutate(deleteId)} disabled={deleteMutation.isPending} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-70">
-                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                {deleteMutation.isPending ? "Deleting..." : "Delete Company"}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Shown after a successful delete while we switch to another company or sign out */}
+      {leavingCompany && (
+        <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-50">
+          <p className="text-sm text-gray-500">Redirecting…</p>
         </div>
       )}
 
@@ -378,9 +413,11 @@ function NumbersPageContent() {
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {session?.role === "OWNER" && (
+                        <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete company">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
