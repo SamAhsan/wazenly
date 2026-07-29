@@ -402,6 +402,138 @@ numbersRouter.post("/:id/refresh-status", requireRole("MANAGER"), async (req: Au
   }
 });
 
+type SetupStatusLevel = "approved" | "pending" | "not_started" | "rejected" | "unknown";
+
+function mapWabaReviewStatus(status: string | undefined): SetupStatusLevel {
+  switch (status) {
+    case "APPROVED": return "approved";
+    case "PENDING_REVIEW":
+    case "PENDING_SUBMISSION": return "pending";
+    case "NOT_STARTED": return "not_started";
+    case "REJECTED": return "rejected";
+    default: return "unknown";
+  }
+}
+
+function mapNameStatus(status: string | undefined): SetupStatusLevel {
+  switch (status) {
+    case "APPROVED":
+    case "AVAILABLE_WITHOUT_REVIEW": return "approved";
+    case "PENDING_REVIEW": return "pending";
+    case "DECLINED":
+    case "EXPIRED": return "rejected";
+    default: return "unknown";
+  }
+}
+
+// GET /api/numbers/:id/setup-status — aggregates the onboarding checklist
+// shown at /dashboard/onboarding. Computed live on every call (no caching
+// table) so it's never stale, the same tradeoff refresh-status above already
+// makes. Each Graph API call is independent (Promise.allSettled) so one
+// failing lookup doesn't blank out the others -- each surfaces "unknown"
+// on its own instead.
+//
+// Payment method is NOT checked here: Meta's Graph API has no documented,
+// reliable field exposing "does this WABA have a payment method on file" --
+// the closest fields relate to spend caps/prepaid balance, not billing setup
+// itself, and guessing from those would risk showing "Completed" when it
+// isn't. It's always reported "unknown"; the frontend links to Meta's
+// Billing page instead of attempting to verify this.
+numbersRouter.get("/:id/setup-status", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+      include: { _count: { select: { templates: true } } },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    let meta: MetaApiService | null = null;
+    try {
+      meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+    } catch {
+      // Token can't be decrypted (e.g. encrypted under a different
+      // ENCRYPTION_KEY) -- every Meta-derived field below stays "unknown".
+    }
+
+    const [phoneInfoResult, wabaInfoResult, subscribedAppsResult] = meta
+      ? await Promise.allSettled([
+          meta.getPhoneNumberInfo(),
+          meta.getWabaInfo(number.wabaId),
+          meta.getSubscribedApps(number.wabaId),
+        ])
+      : [null, null, null];
+
+    const displayNameStatus = phoneInfoResult?.status === "fulfilled"
+      ? mapNameStatus(phoneInfoResult.value.name_status)
+      : "unknown";
+    const businessVerification = wabaInfoResult?.status === "fulfilled"
+      ? mapWabaReviewStatus(wabaInfoResult.value.account_review_status)
+      : "unknown";
+    const webhook = subscribedAppsResult?.status === "fulfilled"
+      ? (subscribedAppsResult.value.data.length > 0 ? "connected" : "disconnected")
+      : "unknown";
+    const templatesStatus = number._count.templates > 0 ? "synced" : "none";
+
+    // Payment method deliberately excluded -- see comment above the route.
+    const productionReady =
+      number.status === "CONNECTED" &&
+      businessVerification === "approved" &&
+      displayNameStatus === "approved" &&
+      webhook === "connected" &&
+      templatesStatus === "synced";
+
+    res.json({
+      workspaceCreated: true,
+      whatsappConnected: true,
+      numberInfo: {
+        displayName: number.displayName,
+        phoneNumber: number.phoneNumber,
+        wabaId: number.wabaId,
+        phoneNumberId: number.phoneNumberId,
+        status: number.status,
+      },
+      businessVerification,
+      paymentMethod: "unknown",
+      displayNameStatus,
+      webhook,
+      templates: { status: templatesStatus, count: number._count.templates },
+      productionReady,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/:id/test-message — sends Meta's default "hello_world"
+// sample template (present on every WABA automatically) to a phone number
+// the user provides, purely to confirm the connection actually works.
+// Deliberately bypasses the conversation/contact system entirely -- this is
+// a connectivity check, not a real conversation.
+numbersRouter.post("/:id/test-message", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const { to } = z.object({ to: z.string().min(6) }).parse(req.body);
+
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    try {
+      const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+      await meta.sendTemplate(to, "hello_world", "en_US");
+    } catch (err) {
+      const metaError = (err as { response?: { data?: unknown } })?.response?.data;
+      console.error("[Numbers] Test message failed:", JSON.stringify(metaError) || (err as Error).message);
+      return res.status(400).json({ error: "Could not send test message. Check the phone number and the Meta App Dashboard for details." });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/numbers/:id/stats
 numbersRouter.get("/:id/stats", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
   try {

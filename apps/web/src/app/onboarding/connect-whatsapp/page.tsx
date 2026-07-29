@@ -40,7 +40,7 @@ export default function ConnectWhatsAppPage() {
     queryFn: () => api.get("/numbers").then((r) => r.data),
   });
   useEffect(() => {
-    if (numbers && numbers.length > 0) router.replace("/dashboard/numbers");
+    if (numbers && numbers.length > 0) router.replace("/dashboard/onboarding");
   }, [numbers, router]);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function ConnectWhatsAppPage() {
         businessId: signupData.businessId,
       });
       toast.success("WhatsApp number connected!");
-      router.push("/dashboard/numbers");
+      router.push("/dashboard/onboarding");
     } catch (err) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Could not connect the number. Please try again.";
       toast.error(message);

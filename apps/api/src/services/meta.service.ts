@@ -82,12 +82,15 @@ export class MetaApiService {
     quality_rating: string;
     platform_type: string;
     messaging_limit_tier?: string;
+    // Meta's review state for the number's display (business) name --
+    // separate from quality_rating and from the WABA-level review below.
+    name_status?: string;
   }> {
     const response = await axios.get(
       `${META_GRAPH_URL}/${this.phoneNumberId}`,
       {
         headers: this.headers,
-        params: { fields: "id,display_phone_number,verified_name,quality_rating,platform_type,messaging_limit_tier" },
+        params: { fields: "id,display_phone_number,verified_name,quality_rating,platform_type,messaging_limit_tier,name_status" },
       }
     );
     return response.data;
@@ -99,6 +102,18 @@ export class MetaApiService {
     const response = await axios.get(`${META_GRAPH_URL}/${wabaId}`, {
       headers: this.headers,
       params: { fields: "account_review_status" },
+    });
+    return response.data;
+  }
+
+  // Whether any app (ours, presumably) is actually subscribed to this WABA's
+  // webhooks -- registerWebhook() succeeding at connect time doesn't
+  // guarantee the subscription is still live later (it can be dropped on
+  // Meta's side independently), so this is checked live rather than inferred
+  // from our own webhookVerifyToken column existing.
+  async getSubscribedApps(wabaId: string): Promise<{ data: Array<{ whatsapp_business_api_data?: { id?: string } }> }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${wabaId}/subscribed_apps`, {
+      headers: this.headers,
     });
     return response.data;
   }

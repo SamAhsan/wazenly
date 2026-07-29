@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   LayoutDashboard, MessageSquare, Megaphone, Users, FileText,
-  Workflow, Phone, BarChart3, Settings, ChevronRight, X, Activity, Shield,
+  Workflow, Phone, BarChart3, Settings, ChevronRight, X, Activity, Shield, ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hasMinRole, type Role } from "@/lib/permissions";
@@ -19,6 +19,7 @@ const navItems: { href: string; label: string; icon: typeof LayoutDashboard; min
   { href: "/dashboard/templates", label: "Templates", icon: FileText, minRole: "AGENT" },
   { href: "/dashboard/flows", label: "Flows", icon: Workflow, minRole: "MANAGER" },
   { href: "/dashboard/numbers", label: "Numbers", icon: Phone, minRole: "MANAGER" },
+  { href: "/dashboard/onboarding", label: "WhatsApp Setup", icon: ListChecks, minRole: "MANAGER" },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings, minRole: "ADMIN" },
   { href: "/dashboard/admin/diagnostics", label: "Diagnostics", icon: Activity, minRole: "OWNER" },
