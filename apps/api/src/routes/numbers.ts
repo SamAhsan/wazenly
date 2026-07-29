@@ -1,5 +1,8 @@
 import { Router } from "express";
 import crypto from "crypto";
+import path from "path";
+import fs from "fs";
+import multer from "multer";
 import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
@@ -10,6 +13,19 @@ import { createDefaultWorkspace } from "./auth";
 
 export const numbersRouter = Router();
 numbersRouter.use(requireAuth, requireWorkspace);
+
+// Same disk-storage pattern as templates.ts's media upload -- the file only
+// needs to live long enough to read its buffer for the Resumable Upload API,
+// then it's deleted.
+const LOGO_UPLOADS_DIR = path.join(__dirname, "../../uploads");
+fs.mkdirSync(LOGO_UPLOADS_DIR, { recursive: true });
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, LOGO_UPLOADS_DIR),
+    filename: (_req, file, cb) => cb(null, `logo-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 const numberSchema = z.object({
   phoneNumberId: z.string().min(1),
@@ -541,6 +557,70 @@ numbersRouter.post("/:id/test-message", requireRole("MANAGER"), async (req: Auth
       return res.status(400).json({ error: "Could not send test message. Check the phone number and the Meta App Dashboard for details." });
     }
 
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/numbers/:id/logo — the WhatsApp Business Profile photo shown to
+// customers, fetched live from Meta each time (not stored) since it's just
+// as easy to ask Meta for the current one as it is to keep a copy in sync.
+numbersRouter.get("/:id/logo", requireRole("MANAGER"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    try {
+      const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+      const profile = await meta.getBusinessProfile();
+      res.json({ logoUrl: profile.profile_picture_url || null });
+    } catch {
+      res.json({ logoUrl: null });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/:id/logo — uploads a new WhatsApp Business Profile photo.
+// Same Resumable Upload flow as template header media (templates.ts's
+// /upload-media), just applied to the business profile endpoint instead of
+// a template component.
+numbersRouter.post("/:id/logo", logoUpload.single("file"), requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ error: "Number not found" });
+    }
+
+    const appId = number.metaAppId || process.env.META_APP_ID;
+    if (!appId) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(500).json({ error: "Could not determine the Meta App ID for this number. Re-save its access token on the Numbers page to resolve it." });
+    }
+
+    try {
+      const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const handle = await meta.uploadResumableMedia(appId, fileBuffer, req.file.mimetype, req.file.originalname);
+      await meta.setBusinessProfilePicture(handle);
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { error?: { message?: string; error_user_msg?: string } } }; message?: string };
+      const metaMsg = axErr.response?.data?.error?.error_user_msg || axErr.response?.data?.error?.message || axErr.message || "Unknown error";
+      console.error("[Numbers] Logo upload failed:", JSON.stringify(axErr.response?.data || axErr.message));
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: `Meta rejected the logo upload: ${metaMsg}` });
+    }
+
+    fs.unlink(req.file.path, () => {});
     res.json({ success: true });
   } catch (err) {
     next(err);

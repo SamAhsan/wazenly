@@ -142,6 +142,27 @@ export class MetaApiService {
     );
   }
 
+  // WhatsApp Business Profile -- the logo/photo shown next to the business
+  // name in customers' WhatsApp chats. Meta wraps this single-object
+  // endpoint in a `data` array (documented behavior, not a list of items).
+  async getBusinessProfile(): Promise<{ profile_picture_url?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${this.phoneNumberId}/whatsapp_business_profile`, {
+      headers: this.headers,
+      params: { fields: "profile_picture_url" },
+    });
+    return response.data?.data?.[0] || {};
+  }
+
+  // handle comes from uploadResumableMedia() -- same Resumable Upload flow
+  // already used for template header media.
+  async setBusinessProfilePicture(handle: string): Promise<void> {
+    await axios.post(
+      `${META_GRAPH_URL}/${this.phoneNumberId}/whatsapp_business_profile`,
+      { messaging_product: "whatsapp", profile_picture_handle: handle },
+      { headers: this.headers }
+    );
+  }
+
   async getTemplates(wabaId: string): Promise<object[]> {
     const response = await axios.get(`${META_GRAPH_URL}/${wabaId}/message_templates`, {
       headers: this.headers,

@@ -56,6 +56,26 @@ function qualityColor(rating: string | null): string {
   return map[rating || ""] || "bg-gray-100 text-gray-500";
 }
 
+// Fetched live from Meta per-row rather than bundled into the main /numbers
+// list -- keeps the list fast even if Meta's slow, and a failed/missing
+// logo just falls back to the plain icon instead of blocking anything.
+function NumberLogo({ numberId }: { numberId: string }) {
+  const { data } = useQuery({
+    queryKey: ["number-logo", numberId],
+    queryFn: () => api.get(`/numbers/${numberId}/logo`).then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  if (data?.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- external Meta CDN URL, not a local/optimizable asset
+    return <img src={data.logoUrl} alt="" className="w-9 h-9 rounded-lg object-cover" />;
+  }
+  return (
+    <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
+      <Phone className="w-4 h-4 text-primary" />
+    </div>
+  );
+}
+
 const numberSchema = z.object({
   phoneNumberId: z.string().min(1, "Required"),
   wabaId: z.string().min(1, "Required"),
@@ -350,9 +370,7 @@ function NumbersPageContent() {
                 <tr key={n.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
-                        <Phone className="w-4 h-4 text-primary" />
-                      </div>
+                      <NumberLogo numberId={n.id} />
                       <div>
                         <p className="text-sm font-medium text-gray-900">{n.displayName}</p>
                         <p className="text-xs text-gray-500 font-mono">{n.phoneNumber}</p>

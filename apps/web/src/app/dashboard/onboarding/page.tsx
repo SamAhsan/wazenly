@@ -115,6 +115,25 @@ function OnboardingContent() {
     onError: (e: { response?: { data?: { error?: string } } }) => toast.error(e.response?.data?.error || "Failed to sync templates"),
   });
 
+  const { data: logo } = useQuery({
+    queryKey: ["number-logo", numberId],
+    queryFn: () => api.get(`/numbers/${numberId}/logo`).then((r) => r.data),
+    enabled: !!numberId,
+  });
+
+  const logoMutation = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api.post(`/numbers/${numberId}/logo`, form, { headers: { "Content-Type": "multipart/form-data" } });
+    },
+    onSuccess: () => {
+      toast.success("Logo updated — it may take a few minutes to appear in WhatsApp.");
+      queryClient.invalidateQueries({ queryKey: ["number-logo", numberId] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) => toast.error(e.response?.data?.error || "Failed to upload logo"),
+  });
+
   const testMessageMutation = useMutation({
     mutationFn: () => api.post(`/numbers/${numberId}/test-message`, { to: testTo }),
     onSuccess: () => toast.success("Test message sent — check the recipient's WhatsApp."),
@@ -203,11 +222,33 @@ function OnboardingContent() {
 
         <ChecklistCard title="WhatsApp Connected" level="approved" checkedAt={status.checkedAt}>
           {status.numberInfo && (
-            <div className="text-xs text-gray-500 space-y-1 mb-1">
-              <p>Business Name: <span className="text-gray-700 font-medium">{status.numberInfo.displayName}</span></p>
-              <p>WABA ID: <span className="font-mono text-gray-700">{status.numberInfo.wabaId}</span></p>
-              <p>Phone Number: <span className="text-gray-700 font-medium">{status.numberInfo.phoneNumber}</span></p>
-              <p>Phone Number ID: <span className="font-mono text-gray-700">{status.numberInfo.phoneNumberId}</span></p>
+            <div className="flex items-start gap-3 mb-1">
+              {logo?.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- external Meta CDN URL
+                <img src={logo.logoUrl} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+              ) : (
+                <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] text-gray-400 shrink-0">No logo</div>
+              )}
+              <div className="text-xs text-gray-500 space-y-1">
+                <p>Business Name: <span className="text-gray-700 font-medium">{status.numberInfo.displayName}</span></p>
+                <p>WABA ID: <span className="font-mono text-gray-700">{status.numberInfo.wabaId}</span></p>
+                <p>Phone Number: <span className="text-gray-700 font-medium">{status.numberInfo.phoneNumber}</span></p>
+                <p>Phone Number ID: <span className="font-mono text-gray-700">{status.numberInfo.phoneNumberId}</span></p>
+                <label className="inline-block text-primary font-medium cursor-pointer hover:underline">
+                  {logoMutation.isPending ? "Uploading..." : logo?.logoUrl ? "Change logo" : "Upload logo"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    disabled={logoMutation.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) logoMutation.mutate(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
             </div>
           )}
         </ChecklistCard>
