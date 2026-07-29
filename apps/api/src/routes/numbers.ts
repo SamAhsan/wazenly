@@ -166,6 +166,21 @@ numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req:
     const webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta/${body.phoneNumberId}`;
     const metaAppId = await meta.debugToken();
 
+    // A number picked via Embedded Signup isn't registered for Cloud API
+    // messaging by default -- Meta leaves it "Pending" (visible in WhatsApp
+    // Manager) until this runs. Best-effort: a genuine failure here shouldn't
+    // block the connect entirely (the number still exists, just not
+    // send/receive-ready yet) -- it's reflected in `status` instead, and
+    // POST /:id/activate below lets it be retried without redoing signup.
+    let registered = true;
+    try {
+      const pin = crypto.randomInt(100000, 999999).toString();
+      await meta.registerPhoneNumber(pin);
+    } catch (err) {
+      registered = false;
+      console.warn("[EmbeddedSignup] Phone registration failed, number will show as PENDING:", (err as Error).message);
+    }
+
     const targetWorkspaceId = await prisma.$transaction(async (tx) => {
       if (!existingNumber) return req.workspaceId!;
       const newWorkspace = await createDefaultWorkspace(tx, req.userId!, metaInfo.verified_name);
@@ -182,7 +197,7 @@ numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req:
         accessToken: encrypt(accessToken),
         metaAppId,
         webhookVerifyToken: verifyToken,
-        status: "CONNECTED",
+        status: registered ? "CONNECTED" : "PENDING",
         qualityRating: metaInfo.quality_rating,
         metaMessagingLimitTier: metaInfo.messaging_limit_tier,
         lastHealthCheckAt: new Date(),
@@ -204,6 +219,40 @@ numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req:
 
     const { accessToken: _, ...safeNumber } = number;
     res.status(201).json({ ...safeNumber, metaInfo, workspaceId: targetWorkspaceId, isNewCompany: !!existingNumber });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/:id/activate — retries Cloud API phone registration for a
+// number stuck at PENDING (e.g. the registration call failed during connect,
+// or an older connection never ran it at all).
+numbersRouter.post("/:id/activate", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspaceId! },
+    });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    let accessToken: string;
+    try {
+      accessToken = decrypt(number.accessToken);
+    } catch {
+      return res.status(400).json({ error: "This number's stored access token can't be decrypted. Reconnect it instead." });
+    }
+
+    const meta = new MetaApiService(accessToken, number.phoneNumberId);
+    const pin = crypto.randomInt(100000, 999999).toString();
+    try {
+      await meta.registerPhoneNumber(pin);
+    } catch (err) {
+      const metaError = (err as { response?: { data?: unknown } })?.response?.data;
+      console.error("[Numbers] Activate failed:", JSON.stringify(metaError) || (err as Error).message);
+      return res.status(400).json({ error: "Could not activate this number with Meta. Check the Meta App Dashboard for details." });
+    }
+
+    await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "CONNECTED" } });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

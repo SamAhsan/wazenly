@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook, ShieldCheck } from "lucide-react";
+import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook, ShieldCheck, Zap } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
@@ -30,6 +30,19 @@ function useRefreshStatus() {
     },
     onError: (e: { response?: { data?: { error?: string } } }) =>
       toast.error(e.response?.data?.error || "Failed to refresh status"),
+  });
+}
+
+function useActivateNumber() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (numberId: string) => api.post(`/numbers/${numberId}/activate`),
+    onSuccess: () => {
+      toast.success("Number activated");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to activate number"),
   });
 }
 
@@ -69,6 +82,7 @@ function NumbersPageContent() {
   const queryClient = useQueryClient();
   const syncMutation = useSyncTemplates();
   const refreshStatusMutation = useRefreshStatus();
+  const activateMutation = useActivateNumber();
 
   const { data: numbers = [], isLoading } = useQuery({
     queryKey: ["numbers"],
@@ -327,6 +341,16 @@ function NumbersPageContent() {
                   <td className="px-5 py-4 text-sm text-gray-500">{n.lastHealthCheckAt ? formatRelativeTime(n.lastHealthCheckAt) : "Never"}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">
+                      {n.status === "PENDING" && (
+                        <button
+                          onClick={() => activateMutation.mutate(n.id)}
+                          disabled={activateMutation.isPending}
+                          className="p-1.5 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Activate — register this number for messaging with Meta"
+                        >
+                          <Zap className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => refreshStatusMutation.mutate(n.id)}
                         disabled={refreshStatusMutation.isPending}

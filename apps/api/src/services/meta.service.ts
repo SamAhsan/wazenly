@@ -103,6 +103,19 @@ export class MetaApiService {
     return response.data;
   }
 
+  // A number picked/created via Embedded Signup isn't registered for Cloud
+  // API messaging by default -- Meta shows it as "Pending" in WhatsApp
+  // Manager until this is called. The PIN is the number's 2-step
+  // verification PIN; any valid 6 digits work, and it can be freely
+  // regenerated on each call (nothing elsewhere depends on it persisting).
+  async registerPhoneNumber(pin: string): Promise<void> {
+    await axios.post(
+      `${META_GRAPH_URL}/${this.phoneNumberId}/register`,
+      { messaging_product: "whatsapp", pin },
+      { headers: this.headers }
+    );
+  }
+
   async registerWebhook(wabaId: string, callbackUrl: string, verifyToken: string): Promise<void> {
     await axios.post(
       `${META_GRAPH_URL}/${wabaId}/subscribed_apps`,
