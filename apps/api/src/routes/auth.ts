@@ -2,15 +2,12 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import axios from "axios";
 import { z } from "zod";
 import { prisma, Prisma } from "@wazenly/db";
 import { authRateLimiter } from "../middleware/rate-limiter";
 import { sendMail } from "../services/mailer.service";
 import { verificationEmail, passwordResetEmail } from "../services/email-templates";
-import { exchangeCodeForToken, exchangeForLongLivedToken, MetaApiService } from "../services/meta.service";
-import { META_GRAPH_URL, META_API_VERSION, encrypt, decrypt } from "@wazenly/shared";
-import { templateSyncQueue } from "@wazenly/queue";
+import { META_API_VERSION } from "@wazenly/shared";
 
 export const authRouter = Router();
 
@@ -283,9 +280,9 @@ authRouter.get("/facebook-config", async (_req, res, next) => {
   }
 });
 
-// Shared by /oauth (Google, via NextAuth's built-in provider) and /facebook-login
-// (Facebook, via the SDK-based exchange below) -- both resolve to "find or create
-// a user by email, find or create their first workspace, issue a token."
+// Shared by /oauth -- called for both Google and Facebook (App B, classic
+// login) via NextAuth's built-in providers -- resolves to "find or create a
+// user by email, find or create their first workspace, issue a token."
 async function findOrCreateOAuthAccount(email: string, name?: string | null, image?: string | null) {
   let user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
@@ -322,74 +319,6 @@ async function findOrCreateOAuthAccount(email: string, name?: string | null, ima
   };
 }
 
-// Attaches a WhatsApp number picked during Embedded Signup (fired via the
-// FINISH event's waba_id/phone_number_id, separate from the login `code`) to
-// a freshly-logged-in user's workspace. Mirrors POST /api/numbers's create
-// logic exactly. Best-effort/non-fatal: a workspace that already has a
-// number is left alone (login still succeeds) rather than erroring the whole
-// sign-in over a number the user probably already connected before -- the
-// "spin up a second company" branch that manual /api/numbers supports isn't
-// replicated here, since self-service Facebook login is a first-time-signup
-// path, not a repeat "add another company" path.
-async function connectNumberFromEmbeddedSignup(
-  workspaceId: string,
-  wabaId: string,
-  phoneNumberId: string,
-  accessToken: string
-): Promise<void> {
-  const existingNumber = await prisma.whatsAppNumber.findFirst({
-    where: { workspaceId },
-    select: { id: true },
-  });
-  if (existingNumber) {
-    console.warn(`[FacebookLogin] Workspace ${workspaceId} already has a number — skipping Embedded Signup number-connect.`);
-    return;
-  }
-
-  const meta = new MetaApiService(accessToken, phoneNumberId);
-  let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
-  try {
-    metaInfo = await meta.getPhoneNumberInfo();
-  } catch (err) {
-    console.error("[FacebookLogin] Could not verify Embedded Signup number with Meta:", (err as Error).message);
-    return;
-  }
-
-  const verifyToken = crypto.randomBytes(32).toString("hex");
-  const webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta/${phoneNumberId}`;
-  const metaAppId = await meta.debugToken();
-
-  const number = await prisma.whatsAppNumber.create({
-    data: {
-      workspaceId,
-      displayName: metaInfo.verified_name,
-      phoneNumber: metaInfo.display_phone_number,
-      phoneNumberId,
-      wabaId,
-      accessToken: encrypt(accessToken),
-      metaAppId,
-      webhookVerifyToken: verifyToken,
-      status: "CONNECTED",
-      qualityRating: metaInfo.quality_rating,
-      metaMessagingLimitTier: (metaInfo as { messaging_limit_tier?: string }).messaging_limit_tier,
-      lastHealthCheckAt: new Date(),
-    },
-  });
-
-  try {
-    await meta.registerWebhook(wabaId, webhookUrl, verifyToken);
-  } catch (err) {
-    console.warn("[FacebookLogin] Webhook registration failed — configure manually in Meta dashboard:", (err as Error).message);
-  }
-
-  await templateSyncQueue.add("sync-templates", {
-    workspaceId,
-    numberId: number.id,
-    wabaId,
-    accessToken: encrypt(accessToken),
-  });
-}
-
 // POST /api/auth/oauth — internal, called only by the web app's NextAuth callbacks
 authRouter.post("/oauth", async (req, res, next) => {
   try {
@@ -404,152 +333,6 @@ authRouter.post("/oauth", async (req, res, next) => {
     }).parse(req.body);
 
     const result = await findOrCreateOAuthAccount(body.email, body.name, body.image);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/auth/facebook-login — internal, called only by the web app's NextAuth
-// "facebook-sdk" credentials provider. Meta blocks the classic redirect-based
-// dialog/oauth login for this app, so login goes through the same FB.login() +
-// config_id mechanism as WhatsApp Embedded Signup instead: the frontend gets a
-// `code` from FB.login(), we exchange it server-side and fetch the profile.
-authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
-  try {
-    if (req.headers["x-internal-secret"] !== process.env.INTERNAL_SERVICE_SECRET) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const body = z.object({
-      code: z.string().min(1).optional(),
-      pendingToken: z.string().min(1).optional(),
-      email: z.string().email().optional(),
-      // Fired via Meta's separate WA_EMBEDDED_SIGNUP postMessage event during
-      // the same popup -- independent of `code`, may or may not be present
-      // depending on whether the user completed the number-picker step.
-      wabaId: z.string().min(1).optional(),
-      phoneNumberId: z.string().min(1).optional(),
-    }).parse(req.body);
-
-    // Step 2: user manually supplied an email after Facebook didn't share one.
-    // A self-typed email is NOT proof of ownership the way Google/Facebook's
-    // own verification is -- never let it silently log someone into an
-    // existing account. Only a brand-new or already-verified-passwordless
-    // account (verified once already, via the same email-confirmation link
-    // every other signup uses) may proceed without re-proving ownership here.
-    if (body.pendingToken) {
-      if (!body.email) return res.status(400).json({ error: "Email is required." });
-
-      let decoded: { fbId: string; name?: string; picture?: string; encToken?: string; wabaId?: string; phoneNumberId?: string };
-      try {
-        decoded = jwt.verify(body.pendingToken, process.env.NEXTAUTH_SECRET || "secret") as {
-          fbId: string; name?: string; picture?: string; encToken?: string; wabaId?: string; phoneNumberId?: string;
-        };
-      } catch {
-        return res.status(400).json({ error: "This sign-in attempt expired. Please try Continue with Facebook again." });
-      }
-
-      const existing = await prisma.user.findUnique({ where: { email: body.email } });
-
-      if (existing?.password) {
-        return res.status(409).json({
-          error: "An account with this email already has a password set. Please sign in with your password instead.",
-        });
-      }
-
-      if (existing?.emailVerified) {
-        const membership = await prisma.workspaceMember.findFirst({
-          where: { userId: existing.id },
-          include: { workspace: true },
-          orderBy: { invitedAt: "asc" },
-        });
-        if (decoded.encToken && decoded.wabaId && decoded.phoneNumberId && membership?.workspaceId) {
-          await connectNumberFromEmbeddedSignup(membership.workspaceId, decoded.wabaId, decoded.phoneNumberId, decrypt(decoded.encToken));
-        }
-        const token = createToken(existing.id, membership?.workspaceId, existing.tokenVersion);
-        return res.json({
-          token,
-          user: { id: existing.id, email: existing.email, name: existing.name },
-          workspace: membership?.workspace,
-          role: membership?.role,
-          isSuperAdmin: existing.isSuperAdmin,
-        });
-      }
-
-      if (!existing) {
-        const newWorkspaceId = await prisma.$transaction(async (tx) => {
-          const newUser = await tx.user.create({
-            data: { email: body.email!, name: decoded.name || undefined, image: decoded.picture || undefined },
-          });
-          const workspace = await createDefaultWorkspace(tx, newUser.id, `${decoded.name || body.email!.split("@")[0]}'s Workspace`);
-          return workspace.id;
-        });
-        if (decoded.encToken && decoded.wabaId && decoded.phoneNumberId) {
-          await connectNumberFromEmbeddedSignup(newWorkspaceId, decoded.wabaId, decoded.phoneNumberId, decrypt(decoded.encToken));
-        }
-      }
-
-      // Either a brand-new account, or an existing-but-unverified one (they
-      // started this before but never clicked the link) -- (re)send
-      // verification and stop here instead of granting access on an unproven email.
-      try {
-        await issueVerificationEmail(body.email, decoded.name || null);
-      } catch (mailErr) {
-        console.error("[FacebookLogin] Failed to send verification email:", mailErr);
-      }
-
-      return res.json({
-        needsVerification: true,
-        message: "Check your email to verify your account, then click Continue with Facebook again to finish signing in.",
-      });
-    }
-
-    // Step 1: normal code exchange.
-    if (!body.code) return res.status(400).json({ error: "Missing code" });
-
-    let accessToken: string;
-    try {
-      const shortLivedToken = await exchangeCodeForToken(body.code);
-      accessToken = (await exchangeForLongLivedToken(shortLivedToken)).accessToken;
-    } catch (err) {
-      // Log Meta's actual error body -- axios's own error.message is just
-      // "Request failed with status code 400", which hides the real reason
-      // (expired/already-used code, redirect_uri mismatch, wrong app, etc.)
-      const metaError = axios.isAxiosError(err) ? err.response?.data : (err as Error).message;
-      console.error("[FacebookLogin] Code exchange failed:", JSON.stringify(metaError));
-      return res.status(400).json({
-        error: "Facebook sign-in failed during token exchange. This usually means the login code expired or was already used — please try again.",
-      });
-    }
-
-    const profile = await axios.get(`${META_GRAPH_URL}/me`, {
-      params: { fields: "id,name,email,picture", access_token: accessToken },
-    });
-
-    if (!profile.data.email) {
-      const pendingToken = jwt.sign(
-        {
-          fbId: profile.data.id,
-          name: profile.data.name,
-          picture: profile.data.picture?.data?.url,
-          // Encrypted (not just signed) -- JWTs aren't confidential, and this
-          // carries a live Meta access token through to the email-completion
-          // step so the number can still be connected without re-prompting Facebook.
-          encToken: body.wabaId && body.phoneNumberId ? encrypt(accessToken) : undefined,
-          wabaId: body.wabaId,
-          phoneNumberId: body.phoneNumberId,
-        },
-        process.env.NEXTAUTH_SECRET || "secret",
-        { expiresIn: "10m" }
-      );
-      return res.json({ needsEmail: true, pendingToken });
-    }
-
-    const result = await findOrCreateOAuthAccount(profile.data.email, profile.data.name, profile.data.picture?.data?.url);
-    if (body.wabaId && body.phoneNumberId && result.workspace?.id) {
-      await connectNumberFromEmbeddedSignup(result.workspace.id, body.wabaId, body.phoneNumberId, accessToken);
-    }
     res.json(result);
   } catch (err) {
     next(err);

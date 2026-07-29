@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@wazenly/db";
 import { requireAuth, requireWorkspace, requireRole, AuthRequest } from "../middleware/auth";
 import { encrypt, decrypt } from "@wazenly/shared";
-import { MetaApiService } from "../services/meta.service";
+import { MetaApiService, exchangeCodeForToken, exchangeForLongLivedToken } from "../services/meta.service";
 import { templateSyncQueue } from "@wazenly/queue";
 import { createDefaultWorkspace } from "./auth";
 
@@ -108,6 +108,98 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
       numberId: number.id,
       wabaId: body.wabaId,
       accessToken: encrypt(body.accessToken),
+    });
+
+    const { accessToken: _, ...safeNumber } = number;
+    res.status(201).json({ ...safeNumber, metaInfo, workspaceId: targetWorkspaceId, isNewCompany: !!existingNumber });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/numbers/connect-embedded-signup — completes the WhatsApp Embedded
+// Signup popup (App A, the WhatsApp Tech Provider app) once the user is
+// already logged in via classic Facebook Login (App B, identity only). The
+// two apps are deliberately separate: App B's "Facebook Login" product has no
+// business-asset scope, and App A's "Facebook Login for Business" product has
+// no email/profile scope -- neither app can do both halves alone. `code`
+// here is App A's OAuth code from FB.login(), exchanged the same way
+// numbers.ts's manual-entry POST / verifies a pasted token, just sourced
+// from Meta instead of typed in.
+const embeddedSignupSchema = z.object({
+  code: z.string().min(1),
+  wabaId: z.string().min(1),
+  phoneNumberId: z.string().min(1),
+  businessId: z.string().optional(),
+});
+
+numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req: AuthRequest, res, next) => {
+  try {
+    const body = embeddedSignupSchema.parse(req.body);
+
+    const existingNumber = await prisma.whatsAppNumber.findFirst({
+      where: { workspaceId: req.workspaceId! },
+      select: { id: true },
+    });
+    if (existingNumber && req.role !== "OWNER") {
+      return res.status(403).json({ error: "This company already has a number. Only the account Owner can add a new company." });
+    }
+
+    let accessToken: string;
+    try {
+      const shortLivedToken = await exchangeCodeForToken(body.code);
+      accessToken = (await exchangeForLongLivedToken(shortLivedToken)).accessToken;
+    } catch (err) {
+      console.error("[EmbeddedSignup] Code exchange failed:", (err as Error).message);
+      return res.status(400).json({ error: "Embedded Signup failed during token exchange. Please try Connect again." });
+    }
+
+    const meta = new MetaApiService(accessToken, body.phoneNumberId);
+    let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
+    try {
+      metaInfo = await meta.getPhoneNumberInfo();
+    } catch {
+      return res.status(400).json({ error: "Could not verify the connected WhatsApp number with Meta." });
+    }
+
+    const verifyToken = crypto.randomBytes(32).toString("hex");
+    const webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta/${body.phoneNumberId}`;
+    const metaAppId = await meta.debugToken();
+
+    const targetWorkspaceId = await prisma.$transaction(async (tx) => {
+      if (!existingNumber) return req.workspaceId!;
+      const newWorkspace = await createDefaultWorkspace(tx, req.userId!, metaInfo.verified_name);
+      return newWorkspace.id;
+    });
+
+    const number = await prisma.whatsAppNumber.create({
+      data: {
+        workspaceId: targetWorkspaceId,
+        displayName: metaInfo.verified_name,
+        phoneNumber: metaInfo.display_phone_number,
+        phoneNumberId: body.phoneNumberId,
+        wabaId: body.wabaId,
+        accessToken: encrypt(accessToken),
+        metaAppId,
+        webhookVerifyToken: verifyToken,
+        status: "CONNECTED",
+        qualityRating: metaInfo.quality_rating,
+        metaMessagingLimitTier: metaInfo.messaging_limit_tier,
+        lastHealthCheckAt: new Date(),
+      },
+    });
+
+    try {
+      await meta.registerWebhook(body.wabaId, webhookUrl, verifyToken);
+    } catch {
+      console.warn("[EmbeddedSignup] Webhook registration failed — configure manually in Meta dashboard");
+    }
+
+    await templateSyncQueue.add("sync-templates", {
+      workspaceId: targetWorkspaceId,
+      numberId: number.id,
+      wabaId: body.wabaId,
+      accessToken: encrypt(accessToken),
     });
 
     const { accessToken: _, ...safeNumber } = number;

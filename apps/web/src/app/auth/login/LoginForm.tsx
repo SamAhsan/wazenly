@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { signIn, getProviders } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -12,8 +12,6 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Facebook, Loader2, ShieldCheck } from "lucide-react";
 import { ChatPreview } from "@/components/marketing/ChatPreview";
-import { useFacebookSdk } from "@/hooks/useFacebookSdk";
-import api from "@/lib/api";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -32,21 +30,8 @@ function LoginFormInner() {
   const [loading, setLoading] = useState(false);
   const [googleAvailable, setGoogleAvailable] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [fbLoading, setFbLoading] = useState(false);
-  const [fbConfig, setFbConfig] = useState<{ configured: boolean; appId: string | null; configId: string | null; apiVersion: string } | null>(null);
-  const sdkReady = useFacebookSdk(fbConfig?.configured ? fbConfig.appId : null, fbConfig?.apiVersion || "v18.0");
-  // Set once Facebook's exchange succeeds but doesn't return an email (this
-  // app's Login configuration has no email scope) -- prompts an inline
-  // "type your email" step instead of failing the sign-in outright.
-  const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
-  const [fbEmailInput, setFbEmailInput] = useState("");
-  // Meta's Embedded Signup returns two pieces of data asynchronously and
-  // independently: FB.login()'s own callback carries the OAuth `code`, while
-  // a separate window.postMessage stream (type WA_EMBEDDED_SIGNUP) carries
-  // the waba_id/phone_number_id the user picked in the popup. Both must
-  // arrive before we call the backend, in either order.
-  const codeRef = useRef<string | null>(null);
-  const signupDataRef = useRef<{ wabaId: string; phoneNumberId: string } | null>(null);
+  const [facebookAvailable, setFacebookAvailable] = useState(false);
+  const [facebookLoading, setFacebookLoading] = useState(false);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -55,133 +40,23 @@ function LoginFormInner() {
   useEffect(() => {
     getProviders().then((providers) => {
       if (providers?.google) setGoogleAvailable(true);
+      if (providers?.facebook) setFacebookAvailable(true);
     });
-    api.get("/auth/facebook-config").then((r) => setFbConfig(r.data)).catch(() => {});
   }, []);
-
-  const facebookAvailable = !!fbConfig?.configured;
 
   function handleGoogleLogin() {
     setGoogleLoading(true);
     signIn("google", { callbackUrl: destination });
   }
 
-  // Completes the sign-in once both FB.login()'s code and (if the user
-  // completed the number-picker step) the WA_EMBEDDED_SIGNUP postMessage
-  // data have arrived -- kept as a plain async function called from (not
-  // passed as) the FB.login() callback below, since Facebook's SDK does a
-  // strict type check that rejects an async function passed directly as the
-  // callback ("Expression is of type asyncfunction, not function").
-  const completeFacebookSignIn = useCallback(async (code: string, signupData: { wabaId: string; phoneNumberId: string } | null) => {
-    try {
-      const result = await signIn("facebook-sdk", {
-        code,
-        wabaId: signupData?.wabaId,
-        phoneNumberId: signupData?.phoneNumberId,
-        redirect: false,
-      });
-      if (result?.error?.startsWith("NEEDS_EMAIL:")) {
-        setFbPendingToken(result.error.slice("NEEDS_EMAIL:".length));
-        toast.info("Facebook didn't share an email with us — enter yours below to finish signing up.");
-      } else if (result?.error === "NEEDS_VERIFICATION") {
-        toast.success("Account created! Check your email to verify, then sign in.");
-      } else if (result?.error === "EMAIL_EXISTS") {
-        toast.error("An account with this email already exists. Please sign in with your password instead.");
-      } else if (result?.error) {
-        toast.error("Facebook sign-in failed. Please try again.");
-      } else {
-        toast.success("Welcome!");
-        router.push("/dashboard/numbers");
-      }
-    } finally {
-      setFbLoading(false);
-    }
-  }, [router]);
-
-  // Fires once at least the code has arrived. If the postMessage step hasn't
-  // landed yet (e.g. genuinely absent because the user backed out of the
-  // number picker), a short grace period lets it catch up before proceeding
-  // without it -- login shouldn't hang forever waiting for a signal that may
-  // never come.
-  const tryFinishFacebookLogin = useCallback(() => {
-    if (!codeRef.current) return;
-    const code = codeRef.current;
-    const signupData = signupDataRef.current;
-    codeRef.current = null;
-    signupDataRef.current = null;
-    void completeFacebookSignIn(code, signupData);
-  }, [completeFacebookSignIn]);
-
-  useEffect(() => {
-    function handleMessage(event: MessageEvent) {
-      if (!event.origin.endsWith("facebook.com")) return;
-      try {
-        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (!data || data.type !== "WA_EMBEDDED_SIGNUP") return;
-        if (data.event === "FINISH" && data.data?.waba_id && data.data?.phone_number_id) {
-          signupDataRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
-          if (codeRef.current) tryFinishFacebookLogin();
-        }
-      } catch {
-        // Not JSON / not ours — ignore
-      }
-    }
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [tryFinishFacebookLogin]);
-
-  async function completeWithEmail() {
-    if (!fbPendingToken || !fbEmailInput) return;
-    setFbLoading(true);
-    try {
-      const result = await signIn("facebook-sdk", { pendingToken: fbPendingToken, email: fbEmailInput, redirect: false });
-      if (result?.error === "NEEDS_VERIFICATION") {
-        toast.success("Account created! Check your email to verify, then sign in.");
-        setFbPendingToken(null);
-        setFbEmailInput("");
-      } else if (result?.error === "EMAIL_EXISTS") {
-        toast.error("An account with this email already exists. Please sign in with your password instead.");
-      } else if (result?.error) {
-        toast.error("Something went wrong. Please try again.");
-      } else {
-        toast.success("Welcome!");
-        router.push("/dashboard/numbers");
-      }
-    } finally {
-      setFbLoading(false);
-    }
-  }
-
+  // Classic OAuth (App B, identity only) -- NextAuth handles the whole
+  // redirect/callback exchange. Routes through a dedicated onboarding step
+  // instead of straight to /dashboard so a fresh signup can immediately be
+  // offered the WhatsApp Embedded Signup connect step (App A, triggered
+  // separately from there since it needs a real user click to open a popup).
   function handleFacebookLogin() {
-    if (!window.FB) {
-      toast.error("Facebook SDK not loaded yet. Try again in a moment.");
-      return;
-    }
-    setFbLoading(true);
-    codeRef.current = null;
-    signupDataRef.current = null;
-    window.FB.login(
-      (response) => {
-        if (!response.authResponse?.code) {
-          setFbLoading(false);
-          return;
-        }
-        codeRef.current = response.authResponse.code;
-        if (signupDataRef.current) {
-          tryFinishFacebookLogin();
-        } else {
-          // Give the WA_EMBEDDED_SIGNUP postMessage a couple seconds to catch
-          // up in case it hasn't landed yet, then proceed with just the code.
-          setTimeout(tryFinishFacebookLogin, 2000);
-        }
-      },
-      {
-        config_id: fbConfig!.configId!,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: { version: "v4" },
-      }
-    );
+    setFacebookLoading(true);
+    signIn("facebook", { callbackUrl: inviteToken ? destination : "/onboarding/connect-whatsapp" });
   }
 
   async function onSubmit(data: FormData) {
@@ -307,7 +182,7 @@ function LoginFormInner() {
             </button>
           </form>
 
-          {(googleAvailable || (facebookAvailable && !inviteToken)) && (
+          {(googleAvailable || facebookAvailable) && (
             <>
               <div className="flex items-center gap-3 my-6">
                 <div className="flex-1 h-px bg-gray-200" />
@@ -336,36 +211,16 @@ function LoginFormInner() {
                   </button>
                 )}
 
-                {facebookAvailable && !inviteToken && !fbPendingToken && (
+                {facebookAvailable && (
                   <button
                     type="button"
                     onClick={handleFacebookLogin}
-                    disabled={fbLoading || !sdkReady}
+                    disabled={facebookLoading}
                     className="w-full flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166fe5] text-white font-medium py-3 px-4 rounded-xl transition-colors disabled:opacity-60"
                   >
-                    <Facebook className="w-4 h-4" /> {fbLoading ? "Connecting..." : !sdkReady ? "Loading..." : "Continue with Facebook"}
+                    {facebookLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Facebook className="w-4 h-4" />}
+                    Continue with Facebook
                   </button>
-                )}
-
-                {fbPendingToken && (
-                  <div className="p-3 border border-gray-200 rounded-xl space-y-2">
-                    <p className="text-xs text-gray-500">Facebook didn&apos;t share an email with us. Enter yours to finish signing up:</p>
-                    <input
-                      type="email"
-                      value={fbEmailInput}
-                      onChange={(e) => setFbEmailInput(e.target.value)}
-                      placeholder="you@company.com"
-                      className="flat-input w-full px-3 py-2 text-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={completeWithEmail}
-                      disabled={fbLoading || !fbEmailInput}
-                      className="w-full bg-[#1877F2] hover:bg-[#166fe5] text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-60"
-                    >
-                      {fbLoading ? "Continuing..." : "Continue"}
-                    </button>
-                  </div>
                 )}
               </div>
             </>

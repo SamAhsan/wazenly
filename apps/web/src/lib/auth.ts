@@ -1,6 +1,7 @@
 import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
+import FacebookProvider from "next-auth/providers/facebook";
 import axios from "axios";
 
 const API_URL = process.env.API_URL || "http://localhost:4000";
@@ -47,68 +48,19 @@ export const authOptions: NextAuthOptions = {
           }),
         ]
       : []),
-    // Facebook login goes through the FB JS SDK (FB.login() + config_id), the
-    // same mechanism as WhatsApp Embedded Signup -- Meta blocks the classic
-    // redirect-based dialog/oauth flow for this app, so there's no ordinary
-    // OAuth provider here. The frontend gets a `code` from FB.login() and
-    // passes it straight through; the API does the actual code exchange.
-    CredentialsProvider({
-      id: "facebook-sdk",
-      name: "Facebook",
-      credentials: {
-        code: { label: "code", type: "text" },
-        pendingToken: { label: "pendingToken", type: "text" },
-        email: { label: "email", type: "text" },
-        wabaId: { label: "wabaId", type: "text" },
-        phoneNumberId: { label: "phoneNumberId", type: "text" },
-      },
-      async authorize(credentials) {
-        try {
-          const { data } = await axios.post(
-            `${API_URL}/api/auth/facebook-login`,
-            {
-              code: credentials?.code,
-              pendingToken: credentials?.pendingToken,
-              email: credentials?.email,
-              wabaId: credentials?.wabaId,
-              phoneNumberId: credentials?.phoneNumberId,
-            },
-            { headers: { "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET } }
-          );
-          // The Meta app's Login configuration can't grant an `email` scope
-          // (it's business-asset-only) -- these two signals let the login page
-          // walk the user through supplying/verifying an email manually instead
-          // of failing outright. Encoded in the thrown error message since
-          // NextAuth's credentials authorize() can only surface a string.
-          if (data.needsEmail) {
-            throw new Error(`NEEDS_EMAIL:${data.pendingToken}`);
-          }
-          if (data.needsVerification) {
-            throw new Error("NEEDS_VERIFICATION");
-          }
-          if (data.token) {
-            return {
-              id: data.user.id,
-              email: data.user.email,
-              name: data.user.name,
-              accessToken: data.token,
-              workspaceId: data.workspace?.id,
-              role: data.role,
-              isSuperAdmin: data.isSuperAdmin,
-            };
-          }
-          return null;
-        } catch (err) {
-          if (err instanceof Error && (err.message.startsWith("NEEDS_EMAIL:") || err.message === "NEEDS_VERIFICATION")) {
-            throw err;
-          }
-          if (axios.isAxiosError(err) && err.response?.status === 409) {
-            throw new Error("EMAIL_EXISTS");
-          }
-          return null;
-        }
-      },
-    }),
+    // Two-app hybrid: this is App B, used purely for identity (classic OAuth,
+    // grants email/public_profile like any normal Facebook Login app). App A
+    // (the WhatsApp Tech Provider app, no email scope available on that
+    // product) is used separately, post-login, for Embedded Signup only --
+    // see /onboarding/connect-whatsapp and POST /api/numbers/connect-embedded-signup.
+    ...(process.env.FACEBOOK_CLIENT_ID && process.env.FACEBOOK_CLIENT_SECRET
+      ? [
+          FacebookProvider({
+            clientId: process.env.FACEBOOK_CLIENT_ID,
+            clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "jwt" },
   pages: {
@@ -117,7 +69,7 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ user, account }) {
-      if (account?.provider !== "google") return true;
+      if (account?.provider !== "google" && account?.provider !== "facebook") return true;
       try {
         const { data } = await axios.post(
           `${API_URL}/api/auth/oauth`,
