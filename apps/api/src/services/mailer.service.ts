@@ -6,9 +6,15 @@ let contactTransporter: Transporter | null = null;
 
 function getTransporter(): Transporter {
   if (!transporter) {
+    const port = Number(process.env.SMTP_PORT) || 587;
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
+      port,
+      // Port 465 is implicit TLS from connection start (SMTPS); anything
+      // else (587, 25) uses STARTTLS. nodemailer doesn't infer this from the
+      // port on its own -- omitting it defaults to STARTTLS and silently
+      // fails/hangs against a port-465-only provider like Resend.
+      secure: port === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
   }
@@ -21,9 +27,11 @@ function getTransporter(): Transporter {
 function getContactTransporter(): Transporter {
   if (!process.env.CONTACT_SMTP_HOST) return getTransporter();
   if (!contactTransporter) {
+    const port = Number(process.env.CONTACT_SMTP_PORT) || 587;
     contactTransporter = nodemailer.createTransport({
       host: process.env.CONTACT_SMTP_HOST,
-      port: Number(process.env.CONTACT_SMTP_PORT) || 587,
+      port,
+      secure: port === 465,
       auth: { user: process.env.CONTACT_SMTP_USER, pass: process.env.CONTACT_SMTP_PASS },
     });
   }
