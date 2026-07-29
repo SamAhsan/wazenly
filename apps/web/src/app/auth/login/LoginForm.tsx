@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { signIn, getProviders } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -40,6 +40,13 @@ function LoginFormInner() {
   // "type your email" step instead of failing the sign-in outright.
   const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
   const [fbEmailInput, setFbEmailInput] = useState("");
+  // Meta's Embedded Signup returns two pieces of data asynchronously and
+  // independently: FB.login()'s own callback carries the OAuth `code`, while
+  // a separate window.postMessage stream (type WA_EMBEDDED_SIGNUP) carries
+  // the waba_id/phone_number_id the user picked in the popup. Both must
+  // arrive before we call the backend, in either order.
+  const codeRef = useRef<string | null>(null);
+  const signupDataRef = useRef<{ wabaId: string; phoneNumberId: string } | null>(null);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -59,14 +66,20 @@ function LoginFormInner() {
     signIn("google", { callbackUrl: destination });
   }
 
-  // Completes the sign-in once FB.login() returns a code -- kept as a plain
-  // async function called from (not passed as) the FB.login() callback below,
-  // since Facebook's SDK does a strict type check that rejects an async
-  // function passed directly as the callback ("Expression is of type
-  // asyncfunction, not function").
-  async function completeFacebookSignIn(code: string) {
+  // Completes the sign-in once both FB.login()'s code and (if the user
+  // completed the number-picker step) the WA_EMBEDDED_SIGNUP postMessage
+  // data have arrived -- kept as a plain async function called from (not
+  // passed as) the FB.login() callback below, since Facebook's SDK does a
+  // strict type check that rejects an async function passed directly as the
+  // callback ("Expression is of type asyncfunction, not function").
+  const completeFacebookSignIn = useCallback(async (code: string, signupData: { wabaId: string; phoneNumberId: string } | null) => {
     try {
-      const result = await signIn("facebook-sdk", { code, redirect: false });
+      const result = await signIn("facebook-sdk", {
+        code,
+        wabaId: signupData?.wabaId,
+        phoneNumberId: signupData?.phoneNumberId,
+        redirect: false,
+      });
       if (result?.error?.startsWith("NEEDS_EMAIL:")) {
         setFbPendingToken(result.error.slice("NEEDS_EMAIL:".length));
         toast.info("Facebook didn't share an email with us — enter yours below to finish signing up.");
@@ -83,7 +96,39 @@ function LoginFormInner() {
     } finally {
       setFbLoading(false);
     }
-  }
+  }, [router]);
+
+  // Fires once at least the code has arrived. If the postMessage step hasn't
+  // landed yet (e.g. genuinely absent because the user backed out of the
+  // number picker), a short grace period lets it catch up before proceeding
+  // without it -- login shouldn't hang forever waiting for a signal that may
+  // never come.
+  const tryFinishFacebookLogin = useCallback(() => {
+    if (!codeRef.current) return;
+    const code = codeRef.current;
+    const signupData = signupDataRef.current;
+    codeRef.current = null;
+    signupDataRef.current = null;
+    void completeFacebookSignIn(code, signupData);
+  }, [completeFacebookSignIn]);
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (!event.origin.endsWith("facebook.com")) return;
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (!data || data.type !== "WA_EMBEDDED_SIGNUP") return;
+        if (data.event === "FINISH" && data.data?.waba_id && data.data?.phone_number_id) {
+          signupDataRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
+          if (codeRef.current) tryFinishFacebookLogin();
+        }
+      } catch {
+        // Not JSON / not ours — ignore
+      }
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [tryFinishFacebookLogin]);
 
   async function completeWithEmail() {
     if (!fbPendingToken || !fbEmailInput) return;
@@ -113,13 +158,22 @@ function LoginFormInner() {
       return;
     }
     setFbLoading(true);
+    codeRef.current = null;
+    signupDataRef.current = null;
     window.FB.login(
       (response) => {
         if (!response.authResponse?.code) {
           setFbLoading(false);
           return;
         }
-        void completeFacebookSignIn(response.authResponse.code);
+        codeRef.current = response.authResponse.code;
+        if (signupDataRef.current) {
+          tryFinishFacebookLogin();
+        } else {
+          // Give the WA_EMBEDDED_SIGNUP postMessage a couple seconds to catch
+          // up in case it hasn't landed yet, then proceed with just the code.
+          setTimeout(tryFinishFacebookLogin, 2000);
+        }
       },
       {
         config_id: fbConfig!.configId!,

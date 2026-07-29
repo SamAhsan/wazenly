@@ -59,12 +59,20 @@ export const authOptions: NextAuthOptions = {
         code: { label: "code", type: "text" },
         pendingToken: { label: "pendingToken", type: "text" },
         email: { label: "email", type: "text" },
+        wabaId: { label: "wabaId", type: "text" },
+        phoneNumberId: { label: "phoneNumberId", type: "text" },
       },
       async authorize(credentials) {
         try {
           const { data } = await axios.post(
             `${API_URL}/api/auth/facebook-login`,
-            { code: credentials?.code, pendingToken: credentials?.pendingToken, email: credentials?.email },
+            {
+              code: credentials?.code,
+              pendingToken: credentials?.pendingToken,
+              email: credentials?.email,
+              wabaId: credentials?.wabaId,
+              phoneNumberId: credentials?.phoneNumberId,
+            },
             { headers: { "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET } }
           );
           // The Meta app's Login configuration can't grant an `email` scope

@@ -8,8 +8,9 @@ import { prisma, Prisma } from "@wazenly/db";
 import { authRateLimiter } from "../middleware/rate-limiter";
 import { sendMail } from "../services/mailer.service";
 import { verificationEmail, passwordResetEmail } from "../services/email-templates";
-import { exchangeCodeForToken, exchangeForLongLivedToken } from "../services/meta.service";
-import { META_GRAPH_URL, META_API_VERSION } from "@wazenly/shared";
+import { exchangeCodeForToken, exchangeForLongLivedToken, MetaApiService } from "../services/meta.service";
+import { META_GRAPH_URL, META_API_VERSION, encrypt, decrypt } from "@wazenly/shared";
+import { templateSyncQueue } from "@wazenly/queue";
 
 export const authRouter = Router();
 
@@ -321,6 +322,74 @@ async function findOrCreateOAuthAccount(email: string, name?: string | null, ima
   };
 }
 
+// Attaches a WhatsApp number picked during Embedded Signup (fired via the
+// FINISH event's waba_id/phone_number_id, separate from the login `code`) to
+// a freshly-logged-in user's workspace. Mirrors POST /api/numbers's create
+// logic exactly. Best-effort/non-fatal: a workspace that already has a
+// number is left alone (login still succeeds) rather than erroring the whole
+// sign-in over a number the user probably already connected before -- the
+// "spin up a second company" branch that manual /api/numbers supports isn't
+// replicated here, since self-service Facebook login is a first-time-signup
+// path, not a repeat "add another company" path.
+async function connectNumberFromEmbeddedSignup(
+  workspaceId: string,
+  wabaId: string,
+  phoneNumberId: string,
+  accessToken: string
+): Promise<void> {
+  const existingNumber = await prisma.whatsAppNumber.findFirst({
+    where: { workspaceId },
+    select: { id: true },
+  });
+  if (existingNumber) {
+    console.warn(`[FacebookLogin] Workspace ${workspaceId} already has a number — skipping Embedded Signup number-connect.`);
+    return;
+  }
+
+  const meta = new MetaApiService(accessToken, phoneNumberId);
+  let metaInfo: Awaited<ReturnType<typeof meta.getPhoneNumberInfo>>;
+  try {
+    metaInfo = await meta.getPhoneNumberInfo();
+  } catch (err) {
+    console.error("[FacebookLogin] Could not verify Embedded Signup number with Meta:", (err as Error).message);
+    return;
+  }
+
+  const verifyToken = crypto.randomBytes(32).toString("hex");
+  const webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/webhooks/meta/${phoneNumberId}`;
+  const metaAppId = await meta.debugToken();
+
+  const number = await prisma.whatsAppNumber.create({
+    data: {
+      workspaceId,
+      displayName: metaInfo.verified_name,
+      phoneNumber: metaInfo.display_phone_number,
+      phoneNumberId,
+      wabaId,
+      accessToken: encrypt(accessToken),
+      metaAppId,
+      webhookVerifyToken: verifyToken,
+      status: "CONNECTED",
+      qualityRating: metaInfo.quality_rating,
+      metaMessagingLimitTier: (metaInfo as { messaging_limit_tier?: string }).messaging_limit_tier,
+      lastHealthCheckAt: new Date(),
+    },
+  });
+
+  try {
+    await meta.registerWebhook(wabaId, webhookUrl, verifyToken);
+  } catch (err) {
+    console.warn("[FacebookLogin] Webhook registration failed — configure manually in Meta dashboard:", (err as Error).message);
+  }
+
+  await templateSyncQueue.add("sync-templates", {
+    workspaceId,
+    numberId: number.id,
+    wabaId,
+    accessToken: encrypt(accessToken),
+  });
+}
+
 // POST /api/auth/oauth — internal, called only by the web app's NextAuth callbacks
 authRouter.post("/oauth", async (req, res, next) => {
   try {
@@ -356,6 +425,11 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
       code: z.string().min(1).optional(),
       pendingToken: z.string().min(1).optional(),
       email: z.string().email().optional(),
+      // Fired via Meta's separate WA_EMBEDDED_SIGNUP postMessage event during
+      // the same popup -- independent of `code`, may or may not be present
+      // depending on whether the user completed the number-picker step.
+      wabaId: z.string().min(1).optional(),
+      phoneNumberId: z.string().min(1).optional(),
     }).parse(req.body);
 
     // Step 2: user manually supplied an email after Facebook didn't share one.
@@ -367,10 +441,10 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
     if (body.pendingToken) {
       if (!body.email) return res.status(400).json({ error: "Email is required." });
 
-      let decoded: { fbId: string; name?: string; picture?: string };
+      let decoded: { fbId: string; name?: string; picture?: string; encToken?: string; wabaId?: string; phoneNumberId?: string };
       try {
         decoded = jwt.verify(body.pendingToken, process.env.NEXTAUTH_SECRET || "secret") as {
-          fbId: string; name?: string; picture?: string;
+          fbId: string; name?: string; picture?: string; encToken?: string; wabaId?: string; phoneNumberId?: string;
         };
       } catch {
         return res.status(400).json({ error: "This sign-in attempt expired. Please try Continue with Facebook again." });
@@ -390,6 +464,9 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
           include: { workspace: true },
           orderBy: { invitedAt: "asc" },
         });
+        if (decoded.encToken && decoded.wabaId && decoded.phoneNumberId && membership?.workspaceId) {
+          await connectNumberFromEmbeddedSignup(membership.workspaceId, decoded.wabaId, decoded.phoneNumberId, decrypt(decoded.encToken));
+        }
         const token = createToken(existing.id, membership?.workspaceId, existing.tokenVersion);
         return res.json({
           token,
@@ -401,12 +478,16 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
       }
 
       if (!existing) {
-        await prisma.$transaction(async (tx) => {
+        const newWorkspaceId = await prisma.$transaction(async (tx) => {
           const newUser = await tx.user.create({
             data: { email: body.email!, name: decoded.name || undefined, image: decoded.picture || undefined },
           });
-          await createDefaultWorkspace(tx, newUser.id, `${decoded.name || body.email!.split("@")[0]}'s Workspace`);
+          const workspace = await createDefaultWorkspace(tx, newUser.id, `${decoded.name || body.email!.split("@")[0]}'s Workspace`);
+          return workspace.id;
         });
+        if (decoded.encToken && decoded.wabaId && decoded.phoneNumberId) {
+          await connectNumberFromEmbeddedSignup(newWorkspaceId, decoded.wabaId, decoded.phoneNumberId, decrypt(decoded.encToken));
+        }
       }
 
       // Either a brand-new account, or an existing-but-unverified one (they
@@ -448,7 +529,17 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
 
     if (!profile.data.email) {
       const pendingToken = jwt.sign(
-        { fbId: profile.data.id, name: profile.data.name, picture: profile.data.picture?.data?.url },
+        {
+          fbId: profile.data.id,
+          name: profile.data.name,
+          picture: profile.data.picture?.data?.url,
+          // Encrypted (not just signed) -- JWTs aren't confidential, and this
+          // carries a live Meta access token through to the email-completion
+          // step so the number can still be connected without re-prompting Facebook.
+          encToken: body.wabaId && body.phoneNumberId ? encrypt(accessToken) : undefined,
+          wabaId: body.wabaId,
+          phoneNumberId: body.phoneNumberId,
+        },
         process.env.NEXTAUTH_SECRET || "secret",
         { expiresIn: "10m" }
       );
@@ -456,6 +547,9 @@ authRouter.post("/facebook-login", authRateLimiter, async (req, res, next) => {
     }
 
     const result = await findOrCreateOAuthAccount(profile.data.email, profile.data.name, profile.data.picture?.data?.url);
+    if (body.wabaId && body.phoneNumberId && result.workspace?.id) {
+      await connectNumberFromEmbeddedSignup(result.workspace.id, body.wabaId, body.phoneNumberId, accessToken);
+    }
     res.json(result);
   } catch (err) {
     next(err);
