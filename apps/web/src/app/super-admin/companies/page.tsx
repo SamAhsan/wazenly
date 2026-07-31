@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Search, Building2, Loader2 } from "lucide-react";
 import api from "@/lib/api";
@@ -16,12 +16,30 @@ interface Company {
   status: string;
   createdAt: string;
   plan: string | null;
-  number: { displayName: string; phoneNumber: string; status: string } | null;
+  number: { id: string; displayName: string; phoneNumber: string; status: string } | null;
   contactsCount: number;
   campaignsCount: number;
   templatesCount: number;
   usersCount: number;
   lastActivity: string;
+}
+
+function CompanyLogo({ numberId }: { numberId?: string }) {
+  const { data } = useQuery({
+    queryKey: ["super-admin-number-logo", numberId],
+    queryFn: () => api.get(`/super-admin/numbers/${numberId}/logo`).then((r) => r.data),
+    enabled: !!numberId,
+    staleTime: 5 * 60 * 1000,
+  });
+  if (data?.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- external Meta CDN URL
+    return <img src={data.logoUrl} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />;
+  }
+  return (
+    <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+      <Building2 className="w-4 h-4 text-primary" />
+    </div>
+  );
 }
 
 const STATUS_FILTERS = [
@@ -111,9 +129,7 @@ function CompaniesPageContent() {
                   <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                     <td className="px-5 py-4">
                       <Link href={`/super-admin/companies/${c.id}`} className="flex items-center gap-3 group">
-                        <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Building2 className="w-4 h-4 text-primary" />
-                        </div>
+                        <CompanyLogo numberId={c.number?.id} />
                         <div>
                           <p className="text-sm font-medium text-gray-900 group-hover:text-primary">{c.name}</p>
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium mt-0.5 ${statusColor(c.status)}`}>{c.status}</span>

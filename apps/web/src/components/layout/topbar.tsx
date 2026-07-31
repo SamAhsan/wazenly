@@ -19,6 +19,28 @@ type CompanyMembership = {
   number: { id: string; displayName: string; phoneNumber: string; status: string } | null;
 };
 
+// Each company's logo is fetched scoped to ITS OWN workspace (via an explicit
+// x-workspace-id header override, independent of whichever company is
+// currently active) -- requireWorkspace re-validates membership per request,
+// so this is safe even for companies other than the one currently selected.
+function CompanyLogo({ workspaceId, numberId, className }: { workspaceId: string; numberId?: string; className: string }) {
+  const { data } = useQuery({
+    queryKey: ["number-logo", numberId],
+    queryFn: () => api.get(`/numbers/${numberId}/logo`, { headers: { "x-workspace-id": workspaceId } }).then((r) => r.data),
+    enabled: !!numberId,
+    staleTime: 5 * 60 * 1000,
+  });
+  if (data?.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- external Meta CDN URL
+    return <img src={data.logoUrl} alt="" className={`${className} object-cover`} />;
+  }
+  return (
+    <div className={`${className} bg-primary/10 flex items-center justify-center`}>
+      <Building2 className="w-1/2 h-1/2 text-primary" />
+    </div>
+  );
+}
+
 // Owner-only: shown instead of the plain number display when the account belongs to
 // more than one company. Switching reissues a token scoped to the chosen company and
 // hard-reloads, so every page, cached query, and the WebSocket connection start clean.
@@ -48,9 +70,7 @@ function CompanySwitcher({ companies, currentWorkspaceId }: { companies: Company
         disabled={switching}
         className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-60"
       >
-        <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-          <Building2 className="w-3.5 h-3.5 text-primary" />
-        </div>
+        <CompanyLogo workspaceId={current?.id || ""} numberId={current?.number?.id} className="w-6 h-6 rounded-full flex-shrink-0" />
         <div className="text-left hidden sm:block">
           <p className="text-xs text-gray-400 leading-none">Active Company</p>
           <p className="text-sm font-semibold text-gray-900 mt-0.5 leading-none">
@@ -71,9 +91,7 @@ function CompanySwitcher({ companies, currentWorkspaceId }: { companies: Company
                 onClick={() => switchTo(c.id)}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left transition-colors ${c.id === currentWorkspaceId ? "bg-primary/5" : ""}`}
               >
-                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Building2 className="w-4 h-4 text-primary" />
-                </div>
+                <CompanyLogo workspaceId={c.id} numberId={c.number?.id} className="w-8 h-8 rounded-full flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">{c.number?.displayName || c.name}</p>
                   <p className="text-xs text-gray-500">{c.number?.phoneNumber || "No number connected"}</p>

@@ -16,6 +16,8 @@ import {
   redis,
 } from "@wazenly/queue";
 import { verifyConnection } from "../services/mailer.service";
+import { MetaApiService } from "../services/meta.service";
+import { decrypt } from "@wazenly/shared";
 
 export const superAdminRouter = Router();
 superAdminRouter.use(requireAuth, requireSuperAdmin);
@@ -101,7 +103,7 @@ superAdminRouter.get("/companies", async (req: AuthRequest, res, next) => {
         select: {
           id: true, name: true, slug: true, status: true, createdAt: true,
           plan: { select: { name: true } },
-          numbers: { select: { displayName: true, phoneNumber: true, status: true } },
+          numbers: { select: { id: true, displayName: true, phoneNumber: true, status: true } },
           _count: { select: { contacts: true, campaigns: true, templates: true, members: true } },
         },
       }),
@@ -342,6 +344,27 @@ superAdminRouter.get("/numbers", async (req: AuthRequest, res, next) => {
 
     const data = numbers.map(({ accessToken, ...n }) => n);
     res.json({ data, total, page: Number(page), limit: Number(limit), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/super-admin/numbers/:id/logo — cross-tenant equivalent of
+// GET /api/numbers/:id/logo (which is workspace-membership-gated and a
+// Super Admin has no WorkspaceMember row for arbitrary companies). Same
+// live-fetch-from-Meta, no-caching approach.
+superAdminRouter.get("/numbers/:id/logo", async (req: AuthRequest, res, next) => {
+  try {
+    const number = await prisma.whatsAppNumber.findUnique({ where: { id: req.params.id } });
+    if (!number) return res.status(404).json({ error: "Number not found" });
+
+    try {
+      const meta = new MetaApiService(decrypt(number.accessToken), number.phoneNumberId);
+      const profile = await meta.getBusinessProfile();
+      res.json({ logoUrl: profile.profile_picture_url || null });
+    } catch {
+      res.json({ logoUrl: null });
+    }
   } catch (err) {
     next(err);
   }

@@ -122,7 +122,7 @@ export const authOptions: NextAuthOptions = {
       // Also picks up isSuperAdmin grant/revoke without a re-login.
       if (!user && trigger !== "update" && token.accessToken && token.workspaceId) {
         const lastChecked = (token.roleCheckedAt as number) || 0;
-        if (Date.now() - lastChecked > 30_000) {
+        if (Date.now() - lastChecked > 5_000) {
           try {
             const { data } = await axios.get(`${API_URL}/api/auth/me`, {
               headers: { Authorization: `Bearer ${token.accessToken}` },

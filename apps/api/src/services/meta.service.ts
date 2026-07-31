@@ -96,12 +96,17 @@ export class MetaApiService {
     return response.data;
   }
 
-  // account_review_status is the WABA's verification state (APPROVED/PENDING/
-  // REJECTED) -- a separate signal from the phone number's own quality_rating.
-  async getWabaInfo(wabaId: string): Promise<{ account_review_status?: string }> {
+  // account_review_status is the WABA's own API-access approval (almost
+  // always "APPROVED" quickly/automatically) -- NOT the same thing as real
+  // Business Verification, which is business_verification_status here.
+  // Confirmed against live data across 4 production WABAs: account_review_status
+  // was "APPROVED" on all four regardless of actual verification state, while
+  // business_verification_status correctly varied ("verified" on 2, "not_verified"
+  // on 2). Both are queryable directly on the WABA node, no separate Business ID needed.
+  async getWabaInfo(wabaId: string): Promise<{ account_review_status?: string; business_verification_status?: string }> {
     const response = await axios.get(`${META_GRAPH_URL}/${wabaId}`, {
       headers: this.headers,
-      params: { fields: "account_review_status" },
+      params: { fields: "account_review_status,business_verification_status" },
     });
     return response.data;
   }

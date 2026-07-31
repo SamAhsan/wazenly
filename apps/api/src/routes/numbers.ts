@@ -89,7 +89,14 @@ numbersRouter.post("/", requireRole("ADMIN"), async (req: AuthRequest, res, next
     }
 
     const targetWorkspaceId = await prisma.$transaction(async (tx) => {
-      if (!existingNumber) return req.workspaceId!;
+      if (!existingNumber) {
+        // Filling a brand-new signup's default workspace (named after the
+        // person, e.g. "John's Workspace", since the business name wasn't
+        // known yet at signup time) -- rename it to the real business name
+        // now that Meta has told us what it actually is.
+        await tx.workspace.update({ where: { id: req.workspaceId! }, data: { name: metaInfo.verified_name } });
+        return req.workspaceId!;
+      }
       const newWorkspace = await createDefaultWorkspace(tx, req.userId!, metaInfo.verified_name);
       return newWorkspace.id;
     });
@@ -198,7 +205,14 @@ numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req:
     }
 
     const targetWorkspaceId = await prisma.$transaction(async (tx) => {
-      if (!existingNumber) return req.workspaceId!;
+      if (!existingNumber) {
+        // Filling a brand-new signup's default workspace (named after the
+        // person, e.g. "John's Workspace", since the business name wasn't
+        // known yet at signup time) -- rename it to the real business name
+        // now that Meta has told us what it actually is.
+        await tx.workspace.update({ where: { id: req.workspaceId! }, data: { name: metaInfo.verified_name } });
+        return req.workspaceId!;
+      }
       const newWorkspace = await createDefaultWorkspace(tx, req.userId!, metaInfo.verified_name);
       return newWorkspace.id;
     });
@@ -433,13 +447,17 @@ numbersRouter.post("/:id/refresh-status", requireRole("MANAGER"), async (req: Au
 
 type SetupStatusLevel = "approved" | "pending" | "not_started" | "rejected" | "unknown";
 
-function mapWabaReviewStatus(status: string | undefined): SetupStatusLevel {
+// business_verification_status values per Meta's Business Manager API --
+// confirmed live against 4 production WABAs (see meta.service.ts comment).
+function mapBusinessVerificationStatus(status: string | undefined): SetupStatusLevel {
   switch (status) {
-    case "APPROVED": return "approved";
-    case "PENDING_REVIEW":
-    case "PENDING_SUBMISSION": return "pending";
-    case "NOT_STARTED": return "not_started";
-    case "REJECTED": return "rejected";
+    case "verified": return "approved";
+    case "pending_submission":
+    case "pending_need_more_info": return "pending";
+    case "not_verified": return "not_started";
+    case "rejected":
+    case "expired":
+    case "revoked": return "rejected";
     default: return "unknown";
   }
 }
@@ -496,7 +514,7 @@ numbersRouter.get("/:id/setup-status", requireRole("MANAGER"), async (req: AuthR
       ? mapNameStatus(phoneInfoResult.value.name_status)
       : "unknown";
     const businessVerification = wabaInfoResult?.status === "fulfilled"
-      ? mapWabaReviewStatus(wabaInfoResult.value.account_review_status)
+      ? mapBusinessVerificationStatus(wabaInfoResult.value.business_verification_status)
       : "unknown";
     const webhook = subscribedAppsResult?.status === "fulfilled"
       ? (subscribedAppsResult.value.data.length > 0 ? "connected" : "disconnected")
