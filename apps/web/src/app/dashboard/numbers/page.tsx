@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook } from "lucide-react";
+import { Plus, Phone, Trash2, RefreshCw, Wifi, WifiOff, Clock, ExternalLink, Pencil, Copy, Webhook, ShieldCheck, Zap } from "lucide-react";
 import api from "@/lib/api";
 import { statusColor, formatRelativeTime } from "@/lib/utils";
 import { RoleGuard } from "@/components/layout/role-guard";
@@ -18,6 +19,61 @@ function useSyncTemplates() {
     onError: (e: { response?: { data?: { error?: string } } }) =>
       toast.error(e.response?.data?.error || "Failed to sync templates"),
   });
+}
+
+function useRefreshStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (numberId: string) => api.post(`/numbers/${numberId}/refresh-status`),
+    onSuccess: () => {
+      toast.success("Status refreshed from Meta");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to refresh status"),
+  });
+}
+
+function useActivateNumber() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (numberId: string) => api.post(`/numbers/${numberId}/activate`),
+    onSuccess: () => {
+      toast.success("Number activated");
+      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    },
+    onError: (e: { response?: { data?: { error?: string } } }) =>
+      toast.error(e.response?.data?.error || "Failed to activate number"),
+  });
+}
+
+function qualityColor(rating: string | null): string {
+  const map: Record<string, string> = {
+    GREEN: "bg-green-100 text-green-700",
+    YELLOW: "bg-yellow-100 text-yellow-700",
+    RED: "bg-red-100 text-red-700",
+  };
+  return map[rating || ""] || "bg-gray-100 text-gray-500";
+}
+
+// Fetched live from Meta per-row rather than bundled into the main /numbers
+// list -- keeps the list fast even if Meta's slow, and a failed/missing
+// logo just falls back to the plain icon instead of blocking anything.
+function NumberLogo({ numberId }: { numberId: string }) {
+  const { data } = useQuery({
+    queryKey: ["number-logo", numberId],
+    queryFn: () => api.get(`/numbers/${numberId}/logo`).then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  if (data?.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- external Meta CDN URL, not a local/optimizable asset
+    return <img src={data.logoUrl} alt="" className="w-9 h-9 rounded-lg object-cover" />;
+  }
+  return (
+    <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
+      <Phone className="w-4 h-4 text-primary" />
+    </div>
+  );
 }
 
 const numberSchema = z.object({
@@ -44,12 +100,20 @@ function NumbersPageContent() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ phoneNumberId: "", wabaId: "", accessToken: "" });
+  const [leavingCompany, setLeavingCompany] = useState(false);
   const queryClient = useQueryClient();
+  const { data: session, update } = useSession();
   const syncMutation = useSyncTemplates();
+  const refreshStatusMutation = useRefreshStatus();
+  const activateMutation = useActivateNumber();
 
   const { data: numbers = [], isLoading } = useQuery({
     queryKey: ["numbers"],
     queryFn: () => api.get("/numbers").then((r) => r.data),
+    // A number's connectivity/quality can change on Meta's side at any time
+    // (disconnected, restricted); poll so that shows up without a manual
+    // page reload, same pattern as the background health check (every 30min).
+    refetchInterval: 30000,
   });
 
   const { data: webhookInfo } = useQuery({
@@ -74,11 +138,34 @@ function NumbersPageContent() {
     onError: (err: { response?: { data?: { error?: string } } }) => toast.error(err.response?.data?.error || "Failed to connect number"),
   });
 
+  // Deleting a number now deletes the entire company (see the backend
+  // comment on DELETE /api/numbers/:id) -- the session's current workspaceId
+  // no longer exists afterward, so every other API call would start failing
+  // until it's pointed somewhere valid. Switch to another company the user
+  // belongs to if one exists; otherwise there's nothing left to switch to,
+  // so sign out and send them to create a fresh one.
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/numbers/${id}`),
-    onSuccess: () => {
-      toast.success("Number removed");
-      queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    onSuccess: async () => {
+      toast.success("Company removed");
+      setDeleteId(null);
+      setLeavingCompany(true);
+      try {
+        const { data } = await api.get("/auth/me");
+        const nextWorkspace = data.workspaces?.[0];
+        if (nextWorkspace) {
+          const { data: switched } = await api.post(`/workspaces/${nextWorkspace.id}/switch`);
+          await update({ accessToken: switched.token, workspaceId: switched.workspaceId, role: switched.role });
+          window.location.href = "/dashboard";
+        } else {
+          await signOut({ callbackUrl: "/auth/register" });
+        }
+      } catch {
+        window.location.href = "/auth/login";
+      }
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => {
+      toast.error(err.response?.data?.error || "Failed to delete company");
       setDeleteId(null);
     },
   });
@@ -234,15 +321,24 @@ function NumbersPageContent() {
       {deleteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <h3 className="font-bold text-gray-900 mb-2">Delete number?</h3>
-            <p className="text-sm text-gray-500 mb-5">This will disconnect the number and stop all active campaigns. This cannot be undone.</p>
+            <h3 className="font-bold text-gray-900 mb-2">Delete this company?</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              This removes the number and permanently deletes this entire company — all campaigns, contacts, conversations, templates, and team members. This cannot be undone.
+            </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm">Cancel</button>
               <button onClick={() => deleteMutation.mutate(deleteId)} disabled={deleteMutation.isPending} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-70">
-                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                {deleteMutation.isPending ? "Deleting..." : "Delete Company"}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Shown after a successful delete while we switch to another company or sign out */}
+      {leavingCompany && (
+        <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-50">
+          <p className="text-sm text-gray-500">Redirecting…</p>
         </div>
       )}
 
@@ -255,25 +351,26 @@ function NumbersPageContent() {
         <EmptyState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-gray-100 text-xs text-gray-500 font-medium">
                 <th className="text-left px-5 py-3.5">Number</th>
                 <th className="text-left px-5 py-3.5">WABA ID</th>
                 <th className="text-left px-5 py-3.5">Status</th>
+                <th className="text-left px-5 py-3.5">Quality</th>
+                <th className="text-left px-5 py-3.5">Verification</th>
                 <th className="text-left px-5 py-3.5">Tier</th>
-                <th className="text-left px-5 py-3.5">Created</th>
+                <th className="text-left px-5 py-3.5">Last Checked</th>
                 <th className="text-right px-5 py-3.5">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {numbers.map((n: { id: string; displayName: string; phoneNumber: string; phoneNumberId: string; wabaId: string; status: string; tier: string; createdAt: string }) => (
+              {numbers.map((n: { id: string; displayName: string; phoneNumber: string; phoneNumberId: string; wabaId: string; status: string; tier: string; createdAt: string; qualityRating: string | null; wabaVerificationStatus: string | null; metaMessagingLimitTier: string | null; lastHealthCheckAt: string | null }) => (
                 <tr key={n.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
-                        <Phone className="w-4 h-4 text-primary" />
-                      </div>
+                      <NumberLogo numberId={n.id} />
                       <div>
                         <p className="text-sm font-medium text-gray-900">{n.displayName}</p>
                         <p className="text-xs text-gray-500 font-mono">{n.phoneNumber}</p>
@@ -287,10 +384,34 @@ function NumbersPageContent() {
                       {n.status}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-sm text-gray-600">{n.tier.replace("_", " ")}</td>
-                  <td className="px-5 py-4 text-sm text-gray-500">{formatRelativeTime(n.createdAt)}</td>
+                  <td className="px-5 py-4">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${qualityColor(n.qualityRating)}`}>
+                      {n.qualityRating || "Unknown"}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 text-sm text-gray-600">{n.wabaVerificationStatus || "Unknown"}</td>
+                  <td className="px-5 py-4 text-sm text-gray-600">{(n.metaMessagingLimitTier || n.tier).replace(/_/g, " ")}</td>
+                  <td className="px-5 py-4 text-sm text-gray-500">{n.lastHealthCheckAt ? formatRelativeTime(n.lastHealthCheckAt) : "Never"}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">
+                      {n.status === "PENDING" && (
+                        <button
+                          onClick={() => activateMutation.mutate(n.id)}
+                          disabled={activateMutation.isPending}
+                          className="p-1.5 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Activate — register this number for messaging with Meta"
+                        >
+                          <Zap className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => refreshStatusMutation.mutate(n.id)}
+                        disabled={refreshStatusMutation.isPending}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Refresh status from Meta"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => syncMutation.mutate(n.id)}
                         disabled={syncMutation.isPending}
@@ -310,15 +431,18 @@ function NumbersPageContent() {
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {session?.role === "OWNER" && (
+                        <button onClick={() => setDeleteId(n.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete company">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

@@ -50,9 +50,11 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
     return;
   }
 
-  const decryptedToken = decrypt(accessToken);
-
   try {
+    // decrypt() itself can throw (e.g. this number's token was encrypted
+    // under a different ENCRYPTION_KEY than this environment's) -- must stay
+    // inside this try, or the job crashes silently with no visible failure.
+    const decryptedToken = decrypt(accessToken);
     const response = await axios.get<MetaTemplateResponse>(
       `${META_GRAPH_URL}/${wabaId}/message_templates`,
       {

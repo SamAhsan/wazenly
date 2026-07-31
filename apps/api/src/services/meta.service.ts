@@ -81,15 +81,54 @@ export class MetaApiService {
     verified_name: string;
     quality_rating: string;
     platform_type: string;
+    messaging_limit_tier?: string;
+    // Meta's review state for the number's display (business) name --
+    // separate from quality_rating and from the WABA-level review below.
+    name_status?: string;
   }> {
     const response = await axios.get(
       `${META_GRAPH_URL}/${this.phoneNumberId}`,
       {
         headers: this.headers,
-        params: { fields: "id,display_phone_number,verified_name,quality_rating,platform_type,messaging_limit_tier" },
+        params: { fields: "id,display_phone_number,verified_name,quality_rating,platform_type,messaging_limit_tier,name_status" },
       }
     );
     return response.data;
+  }
+
+  // account_review_status is the WABA's verification state (APPROVED/PENDING/
+  // REJECTED) -- a separate signal from the phone number's own quality_rating.
+  async getWabaInfo(wabaId: string): Promise<{ account_review_status?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${wabaId}`, {
+      headers: this.headers,
+      params: { fields: "account_review_status" },
+    });
+    return response.data;
+  }
+
+  // Whether any app (ours, presumably) is actually subscribed to this WABA's
+  // webhooks -- registerWebhook() succeeding at connect time doesn't
+  // guarantee the subscription is still live later (it can be dropped on
+  // Meta's side independently), so this is checked live rather than inferred
+  // from our own webhookVerifyToken column existing.
+  async getSubscribedApps(wabaId: string): Promise<{ data: Array<{ whatsapp_business_api_data?: { id?: string } }> }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${wabaId}/subscribed_apps`, {
+      headers: this.headers,
+    });
+    return response.data;
+  }
+
+  // A number picked/created via Embedded Signup isn't registered for Cloud
+  // API messaging by default -- Meta shows it as "Pending" in WhatsApp
+  // Manager until this is called. The PIN is the number's 2-step
+  // verification PIN; any valid 6 digits work, and it can be freely
+  // regenerated on each call (nothing elsewhere depends on it persisting).
+  async registerPhoneNumber(pin: string): Promise<void> {
+    await axios.post(
+      `${META_GRAPH_URL}/${this.phoneNumberId}/register`,
+      { messaging_product: "whatsapp", pin },
+      { headers: this.headers }
+    );
   }
 
   async registerWebhook(wabaId: string, callbackUrl: string, verifyToken: string): Promise<void> {
@@ -100,6 +139,27 @@ export class MetaApiService {
         headers: this.headers,
         params: { callback_url: callbackUrl, verify_token: verifyToken, subscribed_fields: "messages" },
       }
+    );
+  }
+
+  // WhatsApp Business Profile -- the logo/photo shown next to the business
+  // name in customers' WhatsApp chats. Meta wraps this single-object
+  // endpoint in a `data` array (documented behavior, not a list of items).
+  async getBusinessProfile(): Promise<{ profile_picture_url?: string }> {
+    const response = await axios.get(`${META_GRAPH_URL}/${this.phoneNumberId}/whatsapp_business_profile`, {
+      headers: this.headers,
+      params: { fields: "profile_picture_url" },
+    });
+    return response.data?.data?.[0] || {};
+  }
+
+  // handle comes from uploadResumableMedia() -- same Resumable Upload flow
+  // already used for template header media.
+  async setBusinessProfilePicture(handle: string): Promise<void> {
+    await axios.post(
+      `${META_GRAPH_URL}/${this.phoneNumberId}/whatsapp_business_profile`,
+      { messaging_product: "whatsapp", profile_picture_handle: handle },
+      { headers: this.headers }
     );
   }
 
@@ -171,4 +231,34 @@ export class MetaApiService {
       { headers: this.headers }
     );
   }
+}
+
+// --- Embedded Signup / Facebook Login OAuth exchange (app-level -- runs before
+// we have a per-number access token, so these are plain functions, not instance
+// methods). META_APP_SECRET must never be sent to the frontend.
+export async function exchangeCodeForToken(code: string): Promise<string> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      code,
+    },
+  });
+  return response.data.access_token;
+}
+
+export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{ accessToken: string; expiresAt: Date }> {
+  const response = await axios.get(`${META_GRAPH_URL}/oauth/access_token`, {
+    params: {
+      grant_type: "fb_exchange_token",
+      client_id: process.env.META_APP_ID,
+      client_secret: process.env.META_APP_SECRET,
+      fb_exchange_token: shortLivedToken,
+    },
+  });
+  const expiresIn = response.data.expires_in as number; // seconds, ~60 days
+  return {
+    accessToken: response.data.access_token,
+    expiresAt: new Date(Date.now() + expiresIn * 1000),
+  };
 }

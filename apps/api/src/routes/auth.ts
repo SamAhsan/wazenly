@@ -7,6 +7,7 @@ import { prisma, Prisma } from "@wazenly/db";
 import { authRateLimiter } from "../middleware/rate-limiter";
 import { sendMail } from "../services/mailer.service";
 import { verificationEmail, passwordResetEmail } from "../services/email-templates";
+import { META_API_VERSION } from "@wazenly/shared";
 
 export const authRouter = Router();
 
@@ -26,9 +27,9 @@ const registerSchema = z.object({
 const EMAIL_VERIFICATION_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TTL_HOURS) || 24;
 const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== "false";
 
-export function createToken(userId: string, workspaceId?: string): string {
+export function createToken(userId: string, workspaceId?: string, tokenVersion = 0): string {
   return jwt.sign(
-    { sub: userId, workspaceId },
+    { sub: userId, workspaceId, tokenVersion },
     process.env.NEXTAUTH_SECRET || "secret",
     { expiresIn: "7d" }
   );
@@ -154,6 +155,9 @@ authRouter.post("/login", authRateLimiter, async (req, res, next) => {
     if (REQUIRE_EMAIL_VERIFICATION && !user.emailVerified) {
       return res.status(403).json({ error: "EMAIL_NOT_VERIFIED", message: "Please verify your email before signing in." });
     }
+    if (user.suspendedAt) {
+      return res.status(403).json({ error: "USER_SUSPENDED", message: "Your account has been suspended." });
+    }
 
     const membership = await prisma.workspaceMember.findFirst({
       where: { userId: user.id },
@@ -161,7 +165,7 @@ authRouter.post("/login", authRateLimiter, async (req, res, next) => {
       orderBy: { invitedAt: "asc" },
     });
 
-    const token = createToken(user.id, membership?.workspaceId);
+    const token = createToken(user.id, membership?.workspaceId, user.tokenVersion);
     res.json({ token, user: { id: user.id, email: user.email, name: user.name }, workspace: membership?.workspace, role: membership?.role });
   } catch (err) {
     next(err);
@@ -257,6 +261,64 @@ authRouter.post("/resend-verification", authRateLimiter, async (req, res, next) 
   }
 });
 
+// GET /api/auth/facebook-config — public, non-secret bootstrap info for the
+// login page's FB.init()/FB.login() calls. No auth middleware -- this has to
+// work before any session exists. Reuses the same Meta App/Configuration as
+// WhatsApp Embedded Signup (one config_id for both, per current setup).
+authRouter.get("/facebook-config", async (_req, res, next) => {
+  try {
+    const appId = process.env.META_APP_ID || null;
+    const configId = process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || null;
+    res.json({
+      configured: !!(appId && configId),
+      appId,
+      configId,
+      apiVersion: META_API_VERSION,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Shared by /oauth -- called for both Google and Facebook (App B, classic
+// login) via NextAuth's built-in providers -- resolves to "find or create a
+// user by email, find or create their first workspace, issue a token."
+async function findOrCreateOAuthAccount(email: string, name?: string | null, image?: string | null) {
+  let user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    user = await prisma.user.create({
+      data: { email, name: name || undefined, image: image || undefined, emailVerified: new Date() },
+    });
+  } else if (!user.emailVerified) {
+    user = await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } });
+  }
+
+  let membership = await prisma.workspaceMember.findFirst({
+    where: { userId: user.id },
+    include: { workspace: true },
+    orderBy: { invitedAt: "asc" },
+  });
+
+  if (!membership) {
+    const workspace = await prisma.$transaction((tx) =>
+      createDefaultWorkspace(tx, user!.id, `${name || email.split("@")[0]}'s Workspace`)
+    );
+    membership = await prisma.workspaceMember.findFirstOrThrow({
+      where: { workspaceId: workspace.id, userId: user.id },
+      include: { workspace: true },
+    });
+  }
+
+  const token = createToken(user.id, membership.workspaceId, user.tokenVersion);
+  return {
+    token,
+    user: { id: user.id, email: user.email, name: user.name },
+    workspace: membership.workspace,
+    role: membership.role,
+    isSuperAdmin: user.isSuperAdmin,
+  };
+}
+
 // POST /api/auth/oauth — internal, called only by the web app's NextAuth callbacks
 authRouter.post("/oauth", async (req, res, next) => {
   try {
@@ -270,33 +332,8 @@ authRouter.post("/oauth", async (req, res, next) => {
       image: z.string().nullish(),
     }).parse(req.body);
 
-    let user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: { email: body.email, name: body.name || undefined, image: body.image || undefined, emailVerified: new Date() },
-      });
-    } else if (!user.emailVerified) {
-      user = await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } });
-    }
-
-    let membership = await prisma.workspaceMember.findFirst({
-      where: { userId: user.id },
-      include: { workspace: true },
-      orderBy: { invitedAt: "asc" },
-    });
-
-    if (!membership) {
-      const workspace = await prisma.$transaction((tx) =>
-        createDefaultWorkspace(tx, user!.id, `${body.name || body.email.split("@")[0]}'s Workspace`)
-      );
-      membership = await prisma.workspaceMember.findFirstOrThrow({
-        where: { workspaceId: workspace.id, userId: user.id },
-        include: { workspace: true },
-      });
-    }
-
-    const token = createToken(user.id, membership.workspaceId);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name }, workspace: membership.workspace, role: membership.role });
+    const result = await findOrCreateOAuthAccount(body.email, body.name, body.image);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -311,12 +348,12 @@ authRouter.get("/me", async (req, res, next) => {
     const payload = jwt.verify(token, process.env.NEXTAUTH_SECRET || "secret") as { sub: string; workspaceId?: string };
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, name: true, image: true, createdAt: true },
+      select: { id: true, email: true, name: true, image: true, createdAt: true, isSuperAdmin: true },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const workspaces = await prisma.workspaceMember.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, workspace: { status: { not: "DELETED" } } },
       include: {
         workspace: {
           include: { numbers: { select: { id: true, displayName: true, phoneNumber: true, status: true } } },

@@ -9,12 +9,44 @@ async function checkNumberHealth(_job: Job): Promise<void> {
 
   for (const number of numbers) {
     try {
-      await axios.get(`${META_GRAPH_URL}/${number.phoneNumberId}`, {
-        headers: { Authorization: `Bearer ${decrypt(number.accessToken)}` },
-        params: { fields: "id" },
+      // decrypt() itself can throw synchronously (e.g. a token encrypted
+      // under a different ENCRYPTION_KEY than this environment's) -- it must
+      // stay inside this try so one bad number doesn't abort the whole loop
+      // and skip every number after it.
+      const headers = { Authorization: `Bearer ${decrypt(number.accessToken)}` };
+      // Full field fetch (not just fields=id) -- a merely *restricted* number
+      // still returns 200 here (restriction blocks sending, not reading the
+      // object), so quality_rating/messaging_limit_tier are the only signals
+      // that actually surface a restriction; connectivity alone won't.
+      const infoResponse = await axios.get(`${META_GRAPH_URL}/${number.phoneNumberId}`, {
+        headers,
+        params: { fields: "quality_rating,messaging_limit_tier" },
+      });
+      const info: { quality_rating?: string; messaging_limit_tier?: string } = infoResponse.data;
+
+      let wabaVerificationStatus = number.wabaVerificationStatus;
+      try {
+        const wabaResponse = await axios.get(`${META_GRAPH_URL}/${number.wabaId}`, {
+          headers,
+          params: { fields: "account_review_status" },
+        });
+        wabaVerificationStatus = wabaResponse.data?.account_review_status ?? wabaVerificationStatus;
+      } catch {
+        // Keep the previously stored value if this specific call fails --
+        // don't let a WABA-info hiccup block the phone-number-level update.
+      }
+
+      await prisma.whatsAppNumber.update({
+        where: { id: number.id },
+        data: {
+          status: "CONNECTED",
+          qualityRating: info.quality_rating,
+          metaMessagingLimitTier: info.messaging_limit_tier,
+          wabaVerificationStatus,
+          lastHealthCheckAt: new Date(),
+        },
       });
       if (number.status !== "CONNECTED") {
-        await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "CONNECTED" } });
         console.log(`[NumberHealthWorker] ${number.displayName} recovered -> CONNECTED`);
       }
     } catch (err: unknown) {
@@ -29,7 +61,10 @@ async function checkNumberHealth(_job: Job): Promise<void> {
       // a healthy number disconnected.
       if (metaStatus === 401 || metaStatus === 403 || metaStatus === 404 || objectGone) {
         if (number.status !== "DISCONNECTED") {
-          await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "DISCONNECTED" } });
+          await prisma.whatsAppNumber.update({
+            where: { id: number.id },
+            data: { status: "DISCONNECTED", lastHealthCheckAt: new Date() },
+          });
           console.log(`[NumberHealthWorker] ${number.displayName} -> DISCONNECTED (Meta status ${metaStatus}${objectGone ? ", object no longer exists" : ""})`);
         }
       } else {

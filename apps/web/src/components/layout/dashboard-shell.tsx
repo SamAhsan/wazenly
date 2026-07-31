@@ -4,6 +4,7 @@ import { useState } from "react";
 import { NumberProvider } from "@/contexts/number-context";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./topbar";
+import { ImpersonationBanner } from "./impersonation-banner";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -13,6 +14,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-screen overflow-hidden bg-gray-50">
         <Sidebar mobileOpen={sidebarOpen} onMobileClose={() => setSidebarOpen(false)} />
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <ImpersonationBanner />
           <TopBar onMenuClick={() => setSidebarOpen(true)} />
           <main className="flex-1 overflow-y-auto">
             {children}
