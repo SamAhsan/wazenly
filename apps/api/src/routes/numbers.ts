@@ -27,6 +27,16 @@ const logoUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+// Meta error #133005 "Two step verification PIN Mismatch" specifically means
+// a PIN is already set on this number -- most likely by Meta's own Embedded
+// Signup popup, before our /register call ever runs -- not that registration
+// genuinely failed. Treat it as already-registered rather than falling
+// through to the generic failure/PENDING path.
+function isAlreadyRegisteredError(err: unknown): boolean {
+  const code = (err as { response?: { data?: { error?: { code?: number } } } })?.response?.data?.error?.code;
+  return code === 133005;
+}
+
 const numberSchema = z.object({
   phoneNumberId: z.string().min(1),
   wabaId: z.string().min(1),
@@ -200,8 +210,12 @@ numbersRouter.post("/connect-embedded-signup", requireRole("ADMIN"), async (req:
       const pin = crypto.randomInt(100000, 999999).toString();
       await meta.registerPhoneNumber(pin);
     } catch (err) {
-      registered = false;
-      console.warn("[EmbeddedSignup] Phone registration failed, number will show as PENDING:", (err as Error).message);
+      if (isAlreadyRegisteredError(err)) {
+        console.warn("[EmbeddedSignup] Number already registered (PIN mismatch #133005) -- treating as connected.");
+      } else {
+        registered = false;
+        console.warn("[EmbeddedSignup] Phone registration failed, number will show as PENDING:", (err as Error).message);
+      }
     }
 
     const targetWorkspaceId = await prisma.$transaction(async (tx) => {
@@ -276,9 +290,12 @@ numbersRouter.post("/:id/activate", requireRole("ADMIN"), async (req: AuthReques
     try {
       await meta.registerPhoneNumber(pin);
     } catch (err) {
-      const metaError = (err as { response?: { data?: unknown } })?.response?.data;
-      console.error("[Numbers] Activate failed:", JSON.stringify(metaError) || (err as Error).message);
-      return res.status(400).json({ error: "Could not activate this number with Meta. Check the Meta App Dashboard for details." });
+      if (!isAlreadyRegisteredError(err)) {
+        const metaError = (err as { response?: { data?: unknown } })?.response?.data;
+        console.error("[Numbers] Activate failed:", JSON.stringify(metaError) || (err as Error).message);
+        return res.status(400).json({ error: "Could not activate this number with Meta. Check the Meta App Dashboard for details." });
+      }
+      console.warn("[Numbers] Number already registered (PIN mismatch #133005) -- treating as activated.");
     }
 
     await prisma.whatsAppNumber.update({ where: { id: number.id }, data: { status: "CONNECTED" } });
