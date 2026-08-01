@@ -9,6 +9,8 @@ import { ChevronLeft, Plus, Trash2, Upload, FileText, Clock, Loader2 } from "luc
 import api from "@/lib/api";
 import { useSelectedNumber } from "@/contexts/number-context";
 import { RoleGuard } from "@/components/layout/role-guard";
+import { TemplatePreview } from "@/components/templates/preview/TemplatePreview";
+import type { PreviewTemplate } from "@/components/templates/preview/types";
 
 interface TemplateForm {
   name: string;
@@ -47,6 +49,7 @@ interface CarouselCard {
   headerFormat: "IMAGE" | "VIDEO";
   headerHandle?: string;
   headerUrl?: string;
+  localPreview?: string;
   body: string;
   bodyExamples?: Record<string, string>;
   uploading?: boolean;
@@ -150,7 +153,11 @@ function NewTemplatePageContent() {
   };
   const removeCard = (i: number) => setCards(cards.filter((_, idx) => idx !== i));
   const updateCard = (i: number, patch: Partial<CarouselCard>) => {
-    setCards(cards.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+    // Functional update -- handleCardMediaUpload fires this from both a
+    // FileReader callback and an async network response, both captured from
+    // the same closure, so a plain `cards.map(...)` here would race and drop
+    // whichever update lands second.
+    setCards((prev) => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c));
   };
 
   async function handleCardMediaUpload(i: number, file: File) {
@@ -162,6 +169,11 @@ function NewTemplatePageContent() {
       return;
     }
     updateCard(i, { uploading: true, headerHandle: "" });
+    if (cardFormat === "IMAGE") {
+      const reader = new FileReader();
+      reader.onload = (e) => updateCard(i, { localPreview: e.target?.result as string });
+      reader.readAsDataURL(file);
+    }
     try {
       const form = new FormData();
       form.append("file", file);
@@ -273,7 +285,18 @@ function NewTemplatePageContent() {
     { code: "id", label: "Indonesian" }, { code: "tr", label: "Turkish" },
   ];
 
-  const previewBody = body.replace(/\{\{(\d+)\}\}/g, (_, n) => bodyExamples[n] ? `*${bodyExamples[n]}*` : `{{${n}}}`);
+  const previewTemplate: PreviewTemplate = {
+    category: watch("category") as PreviewTemplate["category"],
+    headerType: headerType as PreviewTemplate["headerType"],
+    headerText,
+    mediaSrc: mediaPreview || headerUrl || undefined,
+    documentFileName: mediaFileInfo?.name,
+    body,
+    bodyExamples,
+    footer: watch("footer"),
+    buttons,
+    cards: cards.map((c) => ({ headerFormat: c.headerFormat, mediaSrc: c.localPreview || c.headerUrl, body: c.body, bodyExamples: c.bodyExamples })),
+  };
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -612,71 +635,7 @@ function NewTemplatePageContent() {
         {/* ── PREVIEW ── */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h2 className="font-semibold text-gray-900 mb-3">Live Preview</h2>
-          <div className="bg-[#ECE5DD] rounded-xl p-4 max-w-xs mx-auto">
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              {/* Header preview */}
-              {headerType === "TEXT" && headerText && (
-                <div className="bg-gray-50 px-4 py-3 font-semibold text-sm border-b">{headerText}</div>
-              )}
-              {(headerType === "IMAGE") && (
-                <div className="border-b overflow-hidden">
-                  {(mediaPreview || headerUrl) && headerType === "IMAGE" ? (
-                    <img src={mediaPreview || headerUrl} alt="Header" className="w-full h-32 object-cover" onError={() => {}} />
-                  ) : (
-                    <div className="h-24 flex items-center justify-center bg-gray-100 text-xs text-gray-400">IMAGE</div>
-                  )}
-                </div>
-              )}
-              {headerType === "VIDEO" && (
-                <div className="h-24 bg-gray-800 flex items-center justify-center border-b">
-                  <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                    <div className="w-0 h-0 border-t-4 border-b-4 border-l-8 border-transparent border-l-white ml-1" />
-                  </div>
-                </div>
-              )}
-              {headerType === "DOCUMENT" && (
-                <div className="h-16 bg-blue-50 flex items-center gap-3 px-4 border-b">
-                  <div className="w-8 h-10 bg-blue-100 rounded flex items-center justify-center text-xs text-blue-600 font-bold">PDF</div>
-                  <span className="text-xs text-gray-600">Document</span>
-                </div>
-              )}
-              {/* Body */}
-              <div className="px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
-                {previewBody || <span className="text-gray-300">Your message body will appear here</span>}
-              </div>
-              {/* Buttons (non-carousel — carousel buttons render per-card below) */}
-              {headerType !== "CAROUSEL" && buttons.map((b, i) => (
-                <div key={i} className="border-t px-4 py-2.5 text-center text-sm text-blue-600 font-medium">
-                  {b.text || `Button ${i + 1}`}
-                </div>
-              ))}
-            </div>
-
-            {/* Carousel cards preview */}
-            {headerType === "CAROUSEL" && cards.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto mt-2 pb-1">
-                {cards.map((card, i) => (
-                  <div key={i} className="flex-shrink-0 w-36 bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
-                    {card.headerFormat === "IMAGE" ? (
-                      <img src={card.headerUrl} alt="" className="w-full h-20 object-cover bg-gray-100" onError={() => {}} />
-                    ) : (
-                      <div className="h-20 bg-gray-800 flex items-center justify-center">
-                        <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
-                          <div className="w-0 h-0 border-t-3 border-b-3 border-l-6 border-transparent border-l-white ml-0.5" />
-                        </div>
-                      </div>
-                    )}
-                    <div className="px-2 py-2 text-xs text-gray-700 leading-snug">{card.body || <span className="text-gray-300">Card body…</span>}</div>
-                    {buttons.map((b, bi) => (
-                      <div key={bi} className="border-t px-2 py-1.5 text-center text-[11px] text-blue-600 font-medium truncate">
-                        {b.text || `Button ${bi + 1}`}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <TemplatePreview template={previewTemplate} />
         </div>
 
         {submitError && (
