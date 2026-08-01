@@ -263,6 +263,7 @@ enum TemplateHeaderType {
   VIDEO
   DOCUMENT
   LOCATION
+  CAROUSEL
 }
 
 model Template {
@@ -281,6 +282,11 @@ model Template {
   body         String            @db.Text
   footer       String?
   buttons      Json?
+  // Carousel cards (headerType = CAROUSEL): [{ headerFormat, headerHandle,
+  // headerUrl, body, bodyExamples }, ...]. Buttons are NOT per-card here --
+  // Meta requires every card to share the identical button config, so the
+  // existing `buttons` field above is reused and applied to all cards.
+  cards        Json?
   variables    Json?
   lastSyncedAt DateTime?
   lastUsedAt   DateTime?

@@ -26,12 +26,20 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
+const carouselCardSchema = z.object({
+  headerFormat: z.enum(["IMAGE", "VIDEO"]),
+  headerHandle: z.string().optional(),
+  headerUrl: z.string().optional(),
+  body: z.string().min(1).max(160),
+  bodyExamples: z.record(z.string()).optional(),
+});
+
 const templateSchema = z.object({
   name: z.string().regex(/^[a-z0-9_]+$/),
   category: z.enum(["MARKETING", "UTILITY", "AUTHENTICATION"]),
   language: z.string().default("en"),
   numberId: z.string(),
-  headerType: z.enum(["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "LOCATION"]).default("NONE"),
+  headerType: z.enum(["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "LOCATION", "CAROUSEL"]).default("NONE"),
   headerText: z.string().optional(),
   headerUrl: z.string().optional(),
   headerHandle: z.string().optional(),
@@ -44,6 +52,7 @@ const templateSchema = z.object({
     phone_number: z.string().optional(),
   })).optional(),
   bodyExamples: z.record(z.string()).optional(),
+  cards: z.array(carouselCardSchema).min(2).max(10).optional(),
 });
 
 // Editing only touches content (category + components) -- Meta doesn't allow
@@ -155,6 +164,14 @@ templatesRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, 
         error: "A sample file is required for IMAGE/VIDEO/DOCUMENT headers. Upload one before submitting.",
       });
     }
+    if (body.headerType === "CAROUSEL") {
+      if (!body.cards || body.cards.length < 2) {
+        return res.status(400).json({ error: "A carousel template needs at least 2 cards." });
+      }
+      if (body.cards.some((c) => !c.headerHandle)) {
+        return res.status(400).json({ error: "Every carousel card needs a sample image/video uploaded before submitting." });
+      }
+    }
 
     const accessToken = decrypt(number.accessToken);
     const meta = new MetaApiService(accessToken, number.phoneNumberId);
@@ -202,6 +219,7 @@ templatesRouter.post("/", requireRole("MANAGER"), async (req: AuthRequest, res, 
         body: body.body,
         footer: body.footer,
         buttons: (body.buttons as any) ?? null,
+        cards: (body.cards as any) ?? null,
       },
     });
 
@@ -248,6 +266,14 @@ templatesRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res
         error: "A fresh sample file is required to resubmit an IMAGE/VIDEO/DOCUMENT header — Meta's upload handles are single-use, so the original one can't be reused. Upload one before submitting.",
       });
     }
+    if (body.headerType === "CAROUSEL") {
+      if (!body.cards || body.cards.length < 2) {
+        return res.status(400).json({ error: "A carousel template needs at least 2 cards." });
+      }
+      if (body.cards.some((c) => !c.headerHandle)) {
+        return res.status(400).json({ error: "Meta's upload handles are single-use — every carousel card needs a freshly-uploaded sample image/video to resubmit." });
+      }
+    }
 
     const number = await prisma.whatsAppNumber.findFirst({
       where: { id: template.numberId, workspaceId: req.workspaceId! },
@@ -288,6 +314,7 @@ templatesRouter.put("/:id", requireRole("MANAGER"), async (req: AuthRequest, res
         body: body.body,
         footer: body.footer,
         buttons: (body.buttons as any) ?? null,
+        cards: (body.cards as any) ?? null,
       },
     });
 

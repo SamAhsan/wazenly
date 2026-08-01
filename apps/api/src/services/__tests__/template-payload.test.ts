@@ -69,4 +69,61 @@ describe("buildTemplateComponents", () => {
       { type: "PHONE_NUMBER", text: "Call", phone_number: "+15551234567" },
     ]);
   });
+
+  describe("CAROUSEL", () => {
+    it("has no top-level HEADER or FOOTER, only BODY + CAROUSEL", () => {
+      const components = buildTemplateComponents({
+        headerType: "CAROUSEL",
+        body: "Check out our deals!",
+        cards: [
+          { headerFormat: "IMAGE", headerHandle: "handle1", body: "Card 1" },
+          { headerFormat: "IMAGE", headerHandle: "handle2", body: "Card 2" },
+        ],
+      });
+      expect(components.find((c: any) => c.type === "HEADER")).toBeUndefined();
+      expect(components.find((c: any) => c.type === "FOOTER")).toBeUndefined();
+      expect(components.find((c: any) => c.type === "BODY")).toEqual({ type: "BODY", text: "Check out our deals!" });
+      expect(components.find((c: any) => c.type === "CAROUSEL")).toBeDefined();
+    });
+
+    it("gives every card its own HEADER (with header_handle) and BODY", () => {
+      const components = buildTemplateComponents({
+        headerType: "CAROUSEL",
+        body: "Intro",
+        cards: [
+          { headerFormat: "IMAGE", headerHandle: "h1", body: "Card 1 body", bodyExamples: { "1": "Widget" } },
+          { headerFormat: "IMAGE", headerHandle: "h2", body: "Card 2 body" },
+        ],
+      });
+      const carousel = components.find((c: any) => c.type === "CAROUSEL") as any;
+      expect(carousel.cards).toHaveLength(2);
+      expect(carousel.cards[0].components).toEqual([
+        { type: "HEADER", format: "IMAGE", example: { header_handle: ["h1"] } },
+        { type: "BODY", text: "Card 1 body", example: { body_text: [["Widget"]] } },
+      ]);
+      expect(carousel.cards[1].components).toEqual([
+        { type: "HEADER", format: "IMAGE", example: { header_handle: ["h2"] } },
+        { type: "BODY", text: "Card 2 body" },
+      ]);
+    });
+
+    it("applies the same buttons to every card (Meta requires identical button config per card)", () => {
+      const components = buildTemplateComponents({
+        headerType: "CAROUSEL",
+        body: "Intro",
+        buttons: [{ type: "QUICK_REPLY", text: "Buy now" }],
+        cards: [
+          { headerFormat: "VIDEO", headerHandle: "h1", body: "Card 1" },
+          { headerFormat: "VIDEO", headerHandle: "h2", body: "Card 2" },
+        ],
+      });
+      const carousel = components.find((c: any) => c.type === "CAROUSEL") as any;
+      for (const card of carousel.cards) {
+        expect(card.components.find((c: any) => c.type === "BUTTONS")).toEqual({
+          type: "BUTTONS",
+          buttons: [{ type: "QUICK_REPLY", text: "Buy now" }],
+        });
+      }
+    });
+  });
 });

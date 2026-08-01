@@ -15,9 +15,17 @@ async function sendWhatsAppMessage(
   templateName: string,
   languageCode: string,
   variables: Record<string, string>,
-  header?: { type: string; url?: string | null }
+  header?: { type: string; url?: string | null; cards?: Array<{ headerFormat: string; headerUrl?: string }> | null }
 ): Promise<string> {
   const components: object[] = [];
+
+  const varEntries = Object.entries(variables);
+  if (varEntries.length > 0) {
+    components.push({
+      type: "body",
+      parameters: varEntries.map(([, value]) => ({ type: "text", text: value })),
+    });
+  }
 
   // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
   // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
@@ -32,13 +40,17 @@ async function sendWhatsAppMessage(
       type: "header",
       parameters: [{ type: mediaType, [mediaType]: { link: header.url } }],
     });
-  }
-
-  const varEntries = Object.entries(variables);
-  if (varEntries.length > 0) {
+  } else if (header?.type === "CAROUSEL") {
+    const cards = header.cards || [];
+    if (cards.some((c) => !c.headerUrl)) {
+      throw new Error("This carousel template is missing header media for one or more cards and can't be sent.");
+    }
     components.push({
-      type: "body",
-      parameters: varEntries.map(([, value]) => ({ type: "text", text: value })),
+      type: "carousel",
+      cards: cards.map((c, i) => ({
+        card_index: i,
+        components: [{ type: "header", parameters: [{ type: c.headerFormat.toLowerCase(), [c.headerFormat.toLowerCase()]: { link: c.headerUrl } }] }],
+      })),
     });
   }
 
@@ -239,7 +251,11 @@ async function processCampaignBatch(job: Job<CampaignJobData>): Promise<void> {
         campaign.template!.name,
         campaign.template!.language,
         variables,
-        { type: campaign.template!.headerType, url: campaign.template!.headerUrl }
+        {
+          type: campaign.template!.headerType,
+          url: campaign.template!.headerUrl,
+          cards: campaign.template!.cards as Array<{ headerFormat: string; headerUrl?: string }> | null,
+        }
       );
 
       await prisma.campaignContact.update({

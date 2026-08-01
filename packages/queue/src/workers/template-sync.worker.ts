@@ -26,6 +26,9 @@ interface MetaTemplateResponse {
       text?: string;
       buttons?: object[];
       example?: object;
+      cards?: Array<{
+        components: Array<{ type: string; format?: string; text?: string; buttons?: object[] }>;
+      }>;
     }>;
   }>;
 }
@@ -68,6 +71,17 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
       const headerComponent = t.components.find((c) => c.type === "HEADER");
       const footerComponent = t.components.find((c) => c.type === "FOOTER");
       const buttonComponent = t.components.find((c) => c.type === "BUTTONS");
+      // Carousel templates have no top-level HEADER -- the header lives per-card
+      // inside a CAROUSEL component instead. Meta's template GET response never
+      // returns a resolvable media URL for header examples (same limitation as
+      // regular IMAGE/VIDEO/DOCUMENT headers, see PUT /:id/header-media), so a
+      // synced carousel's cards come in with headerUrl unset until re-uploaded.
+      const carouselComponent = t.components.find((c) => c.type === "CAROUSEL");
+      const carouselCards = carouselComponent?.cards?.map((card) => {
+        const cardHeader = card.components.find((c) => c.type === "HEADER");
+        const cardBody = card.components.find((c) => c.type === "BODY");
+        return { headerFormat: cardHeader?.format?.toUpperCase() || "IMAGE", body: cardBody?.text || "" };
+      });
 
       const existing = await prisma.template.findFirst({
         where: { workspaceId, metaId: t.id },
@@ -92,11 +106,12 @@ async function syncTemplates(job: Job<TemplateSyncJobData>): Promise<void> {
             category: t.category as any,
             language: t.language,
             status: t.status as any,
-            headerType: (headerComponent?.format?.toUpperCase() || "NONE") as any,
+            headerType: (carouselComponent ? "CAROUSEL" : headerComponent?.format?.toUpperCase() || "NONE") as any,
             headerText: headerComponent?.format === "TEXT" ? headerComponent.text : undefined,
             body: bodyComponent?.text || "",
             footer: footerComponent?.text,
             buttons: (buttonComponent?.buttons as any) || null,
+            cards: (carouselCards as any) || null,
             lastSyncedAt: new Date(),
           },
         });

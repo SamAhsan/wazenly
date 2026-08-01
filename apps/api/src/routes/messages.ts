@@ -49,6 +49,8 @@ messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res,
         where: { workspaceId: req.workspaceId!, name: body.templateName },
       });
       const components: object[] = [];
+      const vars = body.templateVars ? Object.values(body.templateVars).map((v) => ({ type: "text", text: v })) : [];
+      if (vars.length) components.push({ type: "body", parameters: vars });
       // IMAGE/VIDEO/DOCUMENT headers require a media parameter on every send —
       // Meta rejects the message with error 132012 otherwise, even if the body has no variables.
       if (template && ["IMAGE", "VIDEO", "DOCUMENT"].includes(template.headerType)) {
@@ -59,9 +61,19 @@ messagesRouter.post("/send", requireRole("AGENT"), async (req: AuthRequest, res,
         }
         const mediaType = template.headerType.toLowerCase();
         components.push({ type: "header", parameters: [{ type: mediaType, [mediaType]: { link: template.headerUrl } }] });
+      } else if (template?.headerType === "CAROUSEL") {
+        const cards = (template.cards as Array<{ headerFormat: string; headerUrl?: string }> | null) || [];
+        if (cards.some((c) => !c.headerUrl)) {
+          return res.status(400).json({ error: "This carousel template is missing header media for one or more cards and can't be sent." });
+        }
+        components.push({
+          type: "carousel",
+          cards: cards.map((c, i) => ({
+            card_index: i,
+            components: [{ type: "header", parameters: [{ type: c.headerFormat.toLowerCase(), [c.headerFormat.toLowerCase()]: { link: c.headerUrl } }] }],
+          })),
+        });
       }
-      const vars = body.templateVars ? Object.values(body.templateVars).map((v) => ({ type: "text", text: v })) : [];
-      if (vars.length) components.push({ type: "body", parameters: vars });
       const result = await meta.sendTemplate(conversation.phone, body.templateName, body.templateLanguage || "en", components);
       metaMessageId = result.id;
     } else if (["IMAGE", "VIDEO", "AUDIO", "DOCUMENT"].includes(body.type) && body.mediaUrl) {

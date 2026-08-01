@@ -43,6 +43,16 @@ interface Button {
   phone_number?: string;
 }
 
+interface CarouselCard {
+  headerFormat: "IMAGE" | "VIDEO";
+  headerHandle?: string;
+  headerUrl?: string;
+  body: string;
+  bodyExamples?: Record<string, string>;
+  uploading?: boolean;
+  mediaFileInfo?: { name: string; size: number };
+}
+
 function NewTemplatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -50,6 +60,7 @@ function NewTemplatePageContent() {
   const isEditMode = !!editId;
   const { selectedNumberId } = useSelectedNumber();
   const [buttons, setButtons] = useState<Button[]>([]);
+  const [cards, setCards] = useState<CarouselCard[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [mediaFileInfo, setMediaFileInfo] = useState<{ name: string; size: number; duration?: number } | null>(null);
@@ -86,6 +97,12 @@ function NewTemplatePageContent() {
       footer: existingTemplate.footer || "",
     });
     setButtons(existingTemplate.buttons || []);
+    // Same single-use-handle constraint as the regular media header: each
+    // card's headerHandle is cleared so a fresh upload is required to resubmit,
+    // even though the card body/format carries over.
+    setCards(
+      (existingTemplate.cards || []).map((c: CarouselCard) => ({ ...c, headerHandle: "", headerUrl: "" }))
+    );
   }, [existingTemplate, reset]);
 
   const headerType = watch("headerType");
@@ -108,7 +125,7 @@ function NewTemplatePageContent() {
   const bodyVarNums = Array.from(new Set((body.match(/\{\{(\d+)\}\}/g) || []).map((m) => parseInt(m.replace(/[{}]/g, ""))))).sort((a, b) => a - b);
 
   const createMutation = useMutation({
-    mutationFn: (d: TemplateForm & { buttons?: Button[]; bodyExamples?: Record<string, string> }) =>
+    mutationFn: (d: TemplateForm & { buttons?: Button[]; bodyExamples?: Record<string, string>; cards?: Partial<CarouselCard>[] }) =>
       isEditMode ? api.put(`/templates/${editId}`, d) : api.post("/templates", d),
     onSuccess: () => {
       toast.success(isEditMode ? "Template resubmitted for Meta approval" : "Template submitted for Meta approval");
@@ -126,6 +143,45 @@ function NewTemplatePageContent() {
   const updateButton = (i: number, field: keyof Button, value: string) => {
     setButtons(buttons.map((b, idx) => idx === i ? { ...b, [field]: value } : b));
   };
+
+  const addCard = () => {
+    if (cards.length >= 10) return;
+    setCards([...cards, { headerFormat: "IMAGE", body: "" }]);
+  };
+  const removeCard = (i: number) => setCards(cards.filter((_, idx) => idx !== i));
+  const updateCard = (i: number, patch: Partial<CarouselCard>) => {
+    setCards(cards.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+  };
+
+  async function handleCardMediaUpload(i: number, file: File) {
+    if (!numberId) { toast.error("Select a WhatsApp number first"); return; }
+    const cardFormat = cards[i].headerFormat;
+    const limits = MEDIA_LIMITS[cardFormat];
+    if (limits && file.size > limits.maxBytes) {
+      toast.error(`File too large — ${limits.label}`);
+      return;
+    }
+    updateCard(i, { uploading: true, headerHandle: "" });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("numberId", numberId);
+      const res = await api.post("/templates/upload-media", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      updateCard(i, {
+        uploading: false,
+        headerUrl: res.data.url,
+        headerHandle: res.data.handle,
+        mediaFileInfo: { name: file.name, size: file.size },
+      });
+      toast.success(`Card ${i + 1} media uploaded to Meta`);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      toast.error(err?.response?.data?.error || "Upload failed");
+      updateCard(i, { uploading: false });
+    }
+  }
 
   function getVideoDuration(file: File): Promise<number | undefined> {
     return new Promise((resolve) => {
@@ -185,10 +241,27 @@ function NewTemplatePageContent() {
       toast.error("Please upload a sample file — Meta requires an example for this header type");
       return;
     }
+    if (d.headerType === "CAROUSEL") {
+      if (cards.length < 2) {
+        toast.error("A carousel needs at least 2 cards");
+        return;
+      }
+      if (cards.some((c) => !c.headerHandle)) {
+        toast.error("Upload a sample image/video for every card first");
+        return;
+      }
+      if (cards.some((c) => !c.body.trim())) {
+        toast.error("Every card needs body text");
+        return;
+      }
+    }
     createMutation.mutate({
       ...d,
       buttons,
       bodyExamples: Object.keys(bodyExamples).length > 0 ? bodyExamples : undefined,
+      cards: d.headerType === "CAROUSEL"
+        ? cards.map((c) => ({ headerFormat: c.headerFormat, headerHandle: c.headerHandle, headerUrl: c.headerUrl, body: c.body, bodyExamples: c.bodyExamples }))
+        : undefined,
     });
   }
 
@@ -264,7 +337,7 @@ function NewTemplatePageContent() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Header Type</label>
               <select {...register("headerType")} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none mb-2">
-                {["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT"].map((t) => <option key={t} value={t}>{t}</option>)}
+                {["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", "CAROUSEL"].map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
 
@@ -395,23 +468,96 @@ function NewTemplatePageContent() {
             </div>
           )}
 
+          {/* Carousel cards */}
+          {headerType === "CAROUSEL" && (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cards</span>
+                  <span className="text-xs text-gray-400 ml-2">2–10 cards, each needs a sample image or video</span>
+                </div>
+                {cards.length < 10 && (
+                  <button type="button" onClick={addCard} className="flex items-center gap-1 text-xs text-primary hover:underline">
+                    <Plus className="w-3.5 h-3.5" /> Add Card
+                  </button>
+                )}
+              </div>
+
+              {cards.length === 0 && <p className="text-xs text-gray-400">No cards yet — add at least 2.</p>}
+
+              {cards.map((card, i) => (
+                <div key={i} className="p-3 bg-white border border-gray-200 rounded-lg space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-600">Card {i + 1}</span>
+                    <button type="button" onClick={() => removeCard(i)} className="p-1 text-gray-400 hover:text-red-600">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <select
+                      value={card.headerFormat}
+                      onChange={(e) => updateCard(i, { headerFormat: e.target.value as "IMAGE" | "VIDEO", headerHandle: "", headerUrl: "" })}
+                      className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs"
+                    >
+                      <option value="IMAGE">IMAGE</option>
+                      <option value="VIDEO">VIDEO</option>
+                    </select>
+                    <input
+                      type="file"
+                      id={`card-file-${i}`}
+                      className="hidden"
+                      accept={MEDIA_LIMITS[card.headerFormat]?.accept}
+                      onChange={(e) => { if (e.target.files?.[0]) handleCardMediaUpload(i, e.target.files[0]); }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById(`card-file-${i}`)?.click()}
+                      disabled={card.uploading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 bg-white rounded-lg text-xs hover:bg-gray-50 disabled:opacity-70"
+                    >
+                      {card.uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      {card.uploading ? "Uploading..." : card.headerHandle ? "Replace file" : `Choose ${card.headerFormat === "IMAGE" ? "Image" : "Video"}`}
+                    </button>
+                    {card.headerHandle && <span className="text-xs text-green-600 self-center">✓ uploaded</span>}
+                  </div>
+                  {card.mediaFileInfo && <p className="text-xs text-gray-400">{card.mediaFileInfo.name} · {formatBytes(card.mediaFileInfo.size)}</p>}
+
+                  <textarea
+                    value={card.body}
+                    onChange={(e) => updateCard(i, { body: e.target.value })}
+                    placeholder="Card body text (max 160 chars)"
+                    maxLength={160}
+                    rows={2}
+                    className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none resize-none"
+                  />
+                </div>
+              ))}
+              <p className="text-xs text-gray-400">Buttons below are applied to every card — Meta requires all cards to share the same button setup.</p>
+            </div>
+          )}
+
           {/* Footer */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Footer <span className="text-gray-400 font-normal">(optional)</span></label>
-            <input
-              {...register("footer")}
-              placeholder="e.g. Reply STOP to unsubscribe"
-              maxLength={60}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <p className="text-xs text-gray-400 mt-0.5">Max 60 characters. Common use: opt-out instructions.</p>
-          </div>
+          {headerType !== "CAROUSEL" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Footer <span className="text-gray-400 font-normal">(optional)</span></label>
+              <input
+                {...register("footer")}
+                placeholder="e.g. Reply STOP to unsubscribe"
+                maxLength={60}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              <p className="text-xs text-gray-400 mt-0.5">Max 60 characters. Common use: opt-out instructions.</p>
+            </div>
+          )}
 
           {/* Buttons */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-gray-700">Buttons <span className="text-gray-400 font-normal">(optional, max 3)</span></label>
-              {buttons.length < 3 && (
+              <label className="text-sm font-medium text-gray-700">
+                {headerType === "CAROUSEL" ? "Card Buttons" : "Buttons"} <span className="text-gray-400 font-normal">(optional, max {headerType === "CAROUSEL" ? 2 : 3})</span>
+              </label>
+              {buttons.length < (headerType === "CAROUSEL" ? 2 : 3) && (
                 <button type="button" onClick={addButton} className="flex items-center gap-1 text-xs text-primary hover:underline">
                   <Plus className="w-3.5 h-3.5" /> Add Button
                 </button>
@@ -426,7 +572,7 @@ function NewTemplatePageContent() {
                       onChange={(e) => updateButton(i, "type", e.target.value)}
                       className="px-2 py-1.5 border border-gray-200 bg-white rounded-lg text-xs"
                     >
-                      {["QUICK_REPLY", "URL", "PHONE_NUMBER"].map((t) => (
+                      {(headerType === "CAROUSEL" ? ["QUICK_REPLY", "URL"] : ["QUICK_REPLY", "URL", "PHONE_NUMBER"]).map((t) => (
                         <option key={t} value={t}>{t.replace("_", " ")}</option>
                       ))}
                     </select>
@@ -498,13 +644,38 @@ function NewTemplatePageContent() {
               <div className="px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
                 {previewBody || <span className="text-gray-300">Your message body will appear here</span>}
               </div>
-              {/* Buttons */}
-              {buttons.map((b, i) => (
+              {/* Buttons (non-carousel — carousel buttons render per-card below) */}
+              {headerType !== "CAROUSEL" && buttons.map((b, i) => (
                 <div key={i} className="border-t px-4 py-2.5 text-center text-sm text-blue-600 font-medium">
                   {b.text || `Button ${i + 1}`}
                 </div>
               ))}
             </div>
+
+            {/* Carousel cards preview */}
+            {headerType === "CAROUSEL" && cards.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto mt-2 pb-1">
+                {cards.map((card, i) => (
+                  <div key={i} className="flex-shrink-0 w-36 bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+                    {card.headerFormat === "IMAGE" ? (
+                      <img src={card.headerUrl} alt="" className="w-full h-20 object-cover bg-gray-100" onError={() => {}} />
+                    ) : (
+                      <div className="h-20 bg-gray-800 flex items-center justify-center">
+                        <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
+                          <div className="w-0 h-0 border-t-3 border-b-3 border-l-6 border-transparent border-l-white ml-0.5" />
+                        </div>
+                      </div>
+                    )}
+                    <div className="px-2 py-2 text-xs text-gray-700 leading-snug">{card.body || <span className="text-gray-300">Card body…</span>}</div>
+                    {buttons.map((b, bi) => (
+                      <div key={bi} className="border-t px-2 py-1.5 text-center text-[11px] text-blue-600 font-medium truncate">
+                        {b.text || `Button ${bi + 1}`}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -524,7 +695,8 @@ function NewTemplatePageContent() {
               createMutation.isPending ||
               uploadingMedia ||
               (headerType === "TEXT" && !headerText) ||
-              (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType) && !headerHandle)
+              (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType) && !headerHandle) ||
+              (headerType === "CAROUSEL" && (cards.length < 2 || cards.some((c) => !c.headerHandle || !c.body.trim() || c.uploading)))
             }
             className="flex-1 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:opacity-50"
           >
