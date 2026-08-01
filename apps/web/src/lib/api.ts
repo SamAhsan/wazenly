@@ -7,7 +7,19 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
-  const session = await getSession();
+  let session = await getSession();
+  // getSession() occasionally returns a stale/empty session even though the
+  // user is still genuinely logged in -- e.g. it can race NextAuth's own
+  // window-focus session refetch right after a native file-picker dialog
+  // steals and returns focus (exactly what happens once per file upload).
+  // That sends the request with no Authorization header, the backend 401s
+  // with a bare "Unauthorized", and the response interceptor below treats
+  // that as a real logout and hard-redirects to /auth/login -- wiping
+  // whatever the user was filling in. One short retry avoids that.
+  if (!session?.accessToken) {
+    await new Promise((r) => setTimeout(r, 300));
+    session = await getSession();
+  }
   if (session?.accessToken) {
     config.headers.Authorization = `Bearer ${session.accessToken}`;
   }
